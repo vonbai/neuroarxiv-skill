@@ -1,0 +1,4 @@
+interface:
+  display_name: "NeuroArxiv"
+  short_description: "Turn academic prior art into one build path"
+  default_prompt: "Use $neuroarxiv to ground this open technical mechanism in arXiv prior art before implementation."
