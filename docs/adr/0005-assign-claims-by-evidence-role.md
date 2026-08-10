@@ -1,0 +1,3 @@
+# Assign claims by evidence role
+
+Research Evidence owns claims about a mechanism's principles, reported evaluation, applicable conditions, and stated limitations. Documentation Evidence owns claims about the current intended capabilities, interfaces, and constraints of a concrete dependency. The caller Agent owns the judgment that connects those claims to the Build Problem. Missing dependency support does not disprove a mechanism; it may imply custom implementation. An unresolved load-bearing conflict becomes an Open Thread, or an Incomplete Research Run when it breaks the Recommended Path's Evidence Chain.

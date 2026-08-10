@@ -1,0 +1,3 @@
+# Bound research by saturation
+
+A Research Run uses a bounded, adaptive default budget: retain at most twelve highly relevant Papers for abstract-level Isolated Reading, deepen at most three load-bearing Papers to full text, and allow at most one mechanism-specific search expansion when initial coverage is insufficient. The run stops at Evidence Saturation or the budget limit. Sparse but usable evidence produces Thin Coverage; a broken load-bearing Evidence Chain produces an Incomplete Research Run. The caller may explicitly override the budget, but the Skill does not probe local tools, Skills, CLIs, MCP servers, connectors, or machine capacity to choose it.
