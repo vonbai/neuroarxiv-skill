@@ -20,6 +20,7 @@ try {
     "references/arxiv-categories.md",
     "scripts/search.mjs",
     "runtime/arxiv.js",
+    "runtime/package.json",
     "runtime/research-run.js",
     "runtime/search-cli.js",
     "runtime/search-command.js",
@@ -28,7 +29,13 @@ try {
     if (!existsSync(join(destination, file))) throw new Error(`installed bundle is missing ${file}`);
   }
   const runtimeFiles = readdirSync(join(destination, "runtime")).sort();
-  const expectedRuntime = ["arxiv.js", "research-run.js", "search-cli.js", "search-command.js"];
+  const expectedRuntime = [
+    "arxiv.js",
+    "package.json",
+    "research-run.js",
+    "search-cli.js",
+    "search-command.js",
+  ];
   if (JSON.stringify(runtimeFiles) !== JSON.stringify(expectedRuntime)) {
     throw new Error(`installed runtime is wider than expected: ${runtimeFiles.join(", ")}`);
   }
