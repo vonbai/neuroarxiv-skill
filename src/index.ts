@@ -1,21 +1,23 @@
-export { run } from "./engine.js";
-export { collectResearchEvidence } from "./research-run.js";
-export { renderText } from "./render.js";
+export {
+  collectResearchEvidence,
+  validateResearchRun,
+} from "./research-run.js";
 export type {
   Paper,
-  PaperRead,
-  Score,
-  Cluster,
-  Citation,
-  ConvergedPath,
-  AlternatePath,
-  RunOptions,
-  RunResult,
-  RunEvent,
   SearchCategory,
   SearchPlan,
   ResearchBudget,
   ResearchEvidenceRequest,
   ResearchEvidenceCoverage,
   ResearchEvidenceResult,
+  EvidenceDepth,
+  PriorArtFinding,
+  ArchitecturalAngle,
+  EvidenceCitation,
+  RecommendedPath,
+  AlternatePath,
+  PriorArtPitfall,
+  DocumentationEvidenceCoverage,
+  ResearchRunArtifact,
+  ResearchRunValidation,
 } from "./types.js";
