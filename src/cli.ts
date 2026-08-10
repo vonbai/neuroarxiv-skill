@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdirSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -44,6 +45,7 @@ function installSkill(argv: string[]): void {
   cpSync(source, targetDir, { recursive: true });
   const runtimeTarget = join(targetDir, "runtime");
   mkdirSync(runtimeTarget, { recursive: true });
+  writeFileSync(join(runtimeTarget, "package.json"), '{"type":"module","private":true}\n');
   for (const file of RUNTIME_FILES) {
     copyFileSync(join(runtime, file), join(runtimeTarget, file));
   }
