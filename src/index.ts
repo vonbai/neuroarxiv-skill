@@ -1,7 +1,6 @@
 export { run } from "./engine.js";
+export { collectResearchEvidence } from "./research-run.js";
 export { renderText } from "./render.js";
-export { CATEGORIES, renderCategoryTable } from "./categories.js";
-export { searchArxivCategories, widenSearch } from "./arxiv.js";
 export type {
   Paper,
   PaperRead,
@@ -13,4 +12,10 @@ export type {
   RunOptions,
   RunResult,
   RunEvent,
+  SearchCategory,
+  SearchPlan,
+  ResearchBudget,
+  ResearchEvidenceRequest,
+  ResearchEvidenceCoverage,
+  ResearchEvidenceResult,
 } from "./types.js";

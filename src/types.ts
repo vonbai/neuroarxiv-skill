@@ -90,3 +90,52 @@ export type RunEvent =
   | { kind: "cluster:done"; clusters: number }
   | { kind: "converge:done"; chosen: string | null }
   | { kind: "warn"; message: string };
+
+export type SearchCategory = {
+  id: string;
+  why: string;
+};
+
+export type SearchPlan = {
+  categories: SearchCategory[];
+  terms: string[];
+  expansionTerms?: string[];
+  sinceYears?: number;
+};
+
+export type ResearchBudget = {
+  maxPapers?: number;
+  papersPerCategory?: number;
+  maxExpansions?: 0 | 1;
+};
+
+export type ResearchEvidenceRequest = {
+  problem: string;
+  searchPlan: SearchPlan;
+  budget?: ResearchBudget;
+};
+
+export type SearchAttempt = {
+  phase: "initial" | "expansion";
+  category: string;
+  terms: string[];
+  paperCount: number;
+  failure?: string;
+};
+
+export type ResearchEvidenceCoverage = {
+  status: "ready" | "thin" | "unavailable";
+  reason: string;
+};
+
+export type ResearchEvidenceResult = {
+  problem: string;
+  searchPlan: Required<Omit<SearchPlan, "expansionTerms">> & {
+    expansionTerms: string[];
+  };
+  budget: Required<ResearchBudget>;
+  papers: Paper[];
+  attempts: SearchAttempt[];
+  expansionUsed: boolean;
+  coverage: ResearchEvidenceCoverage;
+};
