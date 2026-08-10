@@ -71,7 +71,7 @@ export function parseEntries(xml: string, searchedCategory: string): Paper[] {
   const entries = xml.match(/<entry>[\s\S]*?<\/entry>/g) ?? [];
   return entries.map((entry) => {
     const idUrl = extractTag(entry, "id") ?? "";
-    const version = idUrl.match(/abs\/([^/]+)$/)?.[1] ?? idUrl;
+    const version = idUrl.match(/\/abs\/(.+)$/)?.[1] ?? idUrl;
     const id = version.replace(/v\d+$/, "");
     const title = (extractTag(entry, "title") ?? "").replace(/\s+/g, " ").trim();
     const summary = (extractTag(entry, "summary") ?? "")
@@ -187,18 +187,25 @@ export function createArxivGateway(options: ArxivGatewayOptions = {}): ArxivGate
 
   async function fetchText(url: string): Promise<string> {
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-      const response = await schedule(async () => {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
-        try {
-          return await fetchImpl(url, {
-            headers: { "User-Agent": USER_AGENT },
-            signal: controller.signal,
-          });
-        } finally {
-          clearTimeout(timer);
-        }
-      });
+      let response: Response;
+      try {
+        response = await schedule(async () => {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+          try {
+            return await fetchImpl(url, {
+              headers: { "User-Agent": USER_AGENT },
+              signal: controller.signal,
+            });
+          } finally {
+            clearTimeout(timer);
+          }
+        });
+      } catch (error) {
+        if (attempt === maxRetries) throw error;
+        await sleep(5000);
+        continue;
+      }
 
       if (response.ok) return response.text();
       const retryable = response.status === 429 || response.status >= 500;

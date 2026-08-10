@@ -75,6 +75,17 @@ test("parseEntries returns an empty array for a feed with no entries", () => {
   assert.deepEqual(parseEntries("<feed></feed>", "cs.AI"), []);
 });
 
+test("parseEntries preserves the archive prefix in legacy arXiv identifiers", () => {
+  const xml = `<feed><entry>
+    <id>https://arxiv.org/abs/hep-th/9901001v2</id>
+    <title>Legacy identifier</title><summary>Abstract</summary>
+    <published>1999-01-01T00:00:00Z</published><updated>1999-01-02T00:00:00Z</updated>
+  </entry></feed>`;
+  const [result] = parseEntries(xml, "hep-th");
+  assert.equal(result.id, "hep-th/9901001");
+  assert.equal(result.version, "hep-th/9901001v2");
+});
+
 test("gateway serializes concurrent searches and applies the courtesy interval", async () => {
   let now = Date.UTC(2026, 7, 11);
   const sleeps: number[] = [];
@@ -114,6 +125,27 @@ test("gateway retries throttling once with a fresh request", async () => {
           headers: { "retry-after": "0" },
         });
       }
+      return new Response("<feed></feed>", { status: 200 });
+    },
+  });
+
+  await gateway.search({
+    category: "cs.AI",
+    terms: ["agents"],
+    maxResults: 4,
+    sinceYears: 0,
+  });
+  assert.equal(requests, 2);
+});
+
+test("gateway applies bounded recovery to a transient transport failure", async () => {
+  let requests = 0;
+  const gateway = createArxivGateway({
+    requestDelayMs: 0,
+    sleep: async () => undefined,
+    fetch: async () => {
+      requests += 1;
+      if (requests === 1) throw new DOMException("timed out", "AbortError");
       return new Response("<feed></feed>", { status: 200 });
     },
   });

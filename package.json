@@ -24,6 +24,9 @@
     "build": "node scripts/clean-dist.mjs && tsc",
     "test": "node --import tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
+    "check:skill": "node scripts/check-skill.mjs",
+    "check:install": "node scripts/verify-install.mjs",
+    "check": "npm run typecheck && npm test && npm run build && npm run check:skill && npm run check:install",
     "prepare": "npm run build",
     "prepublishOnly": "npm run build",
     "dev": "tsx src/cli.ts",
@@ -42,7 +45,7 @@
     "skill"
   ],
   "license": "MIT",
-  "author": "",
+  "author": "NeuroArxiv contributors",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vonbai/neuroarxiv-skill.git"
