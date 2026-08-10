@@ -1,5 +1,11 @@
 # NeuroArxiv vs baseline — the eval
 
+> **Historical evaluation — v0.1 workflow.** This document is retained for
+> provenance. It measured the former abstract-only workflow, including a
+> Claude-specific companion engine that no longer exists in v0.2. Its results
+> motivate the isolate-then-converge discipline but do not validate the current
+> deterministic module, selective full-text step, budgets, or failure states.
+
 Run: session-based, 2026-08-08 · problems: 5, cross-domain · conditions: 3
 
 **Headline:** across physics, applied math, quantitative biology, ML, and

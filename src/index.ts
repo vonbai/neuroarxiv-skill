@@ -1,16 +1,23 @@
-export { run } from "./engine.js";
-export { renderText } from "./render.js";
-export { CATEGORIES, renderCategoryTable } from "./categories.js";
-export { searchArxivCategories, widenSearch } from "./arxiv.js";
+export {
+  collectResearchEvidence,
+  validateResearchRun,
+} from "./research-run.js";
 export type {
   Paper,
-  PaperRead,
-  Score,
-  Cluster,
-  Citation,
-  ConvergedPath,
+  SearchCategory,
+  SearchPlan,
+  ResearchBudget,
+  ResearchEvidenceRequest,
+  ResearchEvidenceCoverage,
+  ResearchEvidenceResult,
+  EvidenceDepth,
+  PriorArtFinding,
+  ArchitecturalAngle,
+  EvidenceCitation,
+  RecommendedPath,
   AlternatePath,
-  RunOptions,
-  RunResult,
-  RunEvent,
+  PriorArtPitfall,
+  DocumentationEvidenceCoverage,
+  ResearchRunArtifact,
+  ResearchRunValidation,
 } from "./types.js";

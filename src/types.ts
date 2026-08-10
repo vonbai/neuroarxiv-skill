@@ -1,92 +1,126 @@
 export type Paper = {
-  id: string; // bare arXiv id, e.g. "2401.12345"
-  version: string; // versioned id, e.g. "2401.12345v2"
+  id: string;
+  version: string;
   title: string;
-  summary: string; // abstract, whitespace-normalized
+  summary: string;
   authors: string[];
-  categories: string[]; // every category (searched or declared) this paper surfaced under
-  published: string; // ISO date, first submission
-  updated: string; // ISO date, latest version
+  categories: string[];
+  published: string;
+  updated: string;
   absUrl: string;
   pdfUrl: string;
 };
 
-export type Score = {
-  relevance: number; // 0-10, how directly it addresses the stated problem
-  practicality: number; // 0-10, implementable by a small team without exotic infra
-  rigor: number; // 0-10, evidence the abstract itself claims (benchmarks, proofs, deployment) vs pure concept
-  total: number; // weighted
-  trap?: string; // known failure mode / prior-art pitfall, if the abstract implies one
-  strength?: string; // the one concrete thing this paper gets right
+export type SearchCategory = {
+  id: string;
+  why: string;
 };
 
-export type PaperRead = {
-  paper: Paper;
-  approach: string; // core technical mechanism, in the reader's own words
-  borrow: string; // single most concrete implementable takeaway
-  limitation: string; // load-bearing weakness / breaking condition
-  relevanceNote: string; // one clause on fit to the stated problem
-  cluster?: string;
-  score?: Score;
+export type SearchPlan = {
+  categories: SearchCategory[];
+  terms: string[];
+  expansionTerms?: string[];
+  sinceYears?: number;
 };
 
-export type Cluster = {
-  label: string; // underlying architectural angle, not a paper title
-  paperIds: string[]; // Paper.id values
+export type ResearchBudget = {
+  maxPapers?: number;
+  maxFullTextPapers?: number;
+  papersPerCategory?: number;
+  maxExpansions?: 0 | 1;
 };
 
-export type Citation = {
-  paperId: string;
-  title: string;
-  url: string;
-  role: string; // e.g. "primary mechanism", "supporting evidence", "failure mode to avoid"
+export type ResearchEvidenceRequest = {
+  problem: string;
+  searchPlan: SearchPlan;
+  budget?: ResearchBudget;
 };
 
-export type ConvergedPath = {
-  clusterLabel: string;
-  sketch: string; // 4-8 sentences: the recommended architecture, synthesized across the cluster's papers
-  citations: Citation[];
+export type SearchAttempt = {
+  phase: "initial" | "expansion";
+  category: string;
+  terms: string[];
+  paperCount: number;
+  failure?: string;
+};
+
+export type ResearchEvidenceCoverage = {
+  status: "ready" | "thin" | "unavailable";
+  reason: string;
+};
+
+export type ResearchEvidenceResult = {
+  problem: string;
+  searchPlan: Required<Omit<SearchPlan, "expansionTerms">> & {
+    expansionTerms: string[];
+  };
+  budget: Required<ResearchBudget>;
+  papers: Paper[];
+  attempts: SearchAttempt[];
+  expansionUsed: boolean;
+  coverage: ResearchEvidenceCoverage;
+};
+
+export type EvidenceDepth = "abstract" | "full-text";
+
+export type PriorArtFinding = {
+  paperVersion: string;
+  evidenceDepth: EvidenceDepth;
+  isolationStatus: "isolated" | "recovered" | "broken";
+  approach: string;
+  borrow: string;
+  limitation: string;
+  relevanceNote: string;
+};
+
+export type ArchitecturalAngle = {
+  label: string;
+  paperVersions: string[];
+};
+
+export type EvidenceCitation = {
+  paperVersion: string;
+  role: string;
+};
+
+export type RecommendedPath = {
+  angle: string;
+  sketch: string;
   firstStep: string;
   loadBearingRisk: string;
-  avoid: string[]; // known prior-art pitfalls to not repeat, drawn from across ALL clusters
+  citations: EvidenceCitation[];
 };
 
 export type AlternatePath = {
-  label: string;
-  oneLiner: string; // why it was considered but not chosen
+  angle: string;
+  tradeOff: string;
 };
 
-export type RunResult = {
+export type PriorArtPitfall = {
+  paperVersion: string;
+  risk: string;
+};
+
+export type DocumentationEvidenceCoverage = {
+  status: "used" | "not-needed" | "unavailable";
+  reason: string;
+  sourceIdentity?: string;
+};
+
+export type ResearchRunArtifact = {
+  status: "complete" | "thin" | "incomplete";
   problem: string;
-  categories: { id: string; why: string }[];
-  searchTerms: string[];
-  note?: string; // honesty flag when the problem has weak arXiv coverage
-  papers: Paper[];
-  reads: PaperRead[];
-  clusters: Cluster[];
-  chosenPath: ConvergedPath | null;
+  researchEvidence: ResearchEvidenceResult;
+  findings: PriorArtFinding[];
+  angles: ArchitecturalAngle[];
+  recommendedPath: RecommendedPath | null;
   alternates: AlternatePath[];
-  openThread: string;
+  pitfalls: PriorArtPitfall[];
+  openThreads: string[];
+  documentationEvidence: DocumentationEvidenceCoverage;
 };
 
-export type RunOptions = {
-  problem: string;
-  context?: string; // codebase snippets, constraints, stack
-  categories?: string[]; // override auto-detected arXiv category ids
-  papersPerCategory?: number; // default 4
-  concurrency?: number; // parallel LLM read calls, default 4
-  sinceYears?: number; // filter papers older than N years, default 8 (0 = no filter)
-  model?: string; // override SDK model (reader + synthesizer)
-  criticModel?: string; // override model for score + cluster passes; falls back to `model`
-  onEvent?: (e: RunEvent) => void;
+export type ResearchRunValidation = {
+  valid: boolean;
+  errors: string[];
 };
-
-export type RunEvent =
-  | { kind: "categories:done"; categories: string[]; terms: string[] }
-  | { kind: "fetch:done"; category: string; count: number }
-  | { kind: "read:start"; paperId: string; title: string }
-  | { kind: "read:done"; paperId: string }
-  | { kind: "score:done"; total: number }
-  | { kind: "cluster:done"; clusters: number }
-  | { kind: "converge:done"; chosen: string | null }
-  | { kind: "warn"; message: string };

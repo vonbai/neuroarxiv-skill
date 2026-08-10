@@ -1,178 +1,94 @@
 #!/usr/bin/env node
-// CLI surface for neuroarxiv.
-//
-// Usage:
-//   neuroarxiv "how should I cache LLM completions across requests?"
-//   neuroarxiv "..." --categories cs.DB,cs.DC --papers 5 --json > result.json
-//   neuroarxiv install    (drop the skill into ~/.claude/skills/neuroarxiv)
 
-import { readFileSync, statSync, mkdirSync, copyFileSync, existsSync } from "node:fs";
+import {
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  rmSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { run } from "./engine.js";
-import { renderText } from "./render.js";
-import type { RunEvent, RunOptions } from "./types.js";
+import { printSearchHelp, searchEvidence } from "./search-command.js";
 
-// Package root is one level up from dist/cli.js (or src/cli.ts under tsx).
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const RUNTIME_FILES = [
+  "arxiv.js",
+  "research-run.js",
+  "search-command.js",
+  "search-cli.js",
+];
 
-function installSkill(): void {
-  const source = join(PACKAGE_ROOT, "skills", "neuroarxiv", "SKILL.md");
-  if (!existsSync(source)) {
-    console.error(`Error: couldn't find the bundled SKILL.md at ${source}`);
-    console.error("This usually means the package wasn't installed with its skills/ directory intact.");
-    process.exit(1);
+function installSkill(argv: string[]): void {
+  const source = join(PACKAGE_ROOT, "skills", "neuroarxiv");
+  const runtime = join(PACKAGE_ROOT, "dist");
+  if (!existsSync(join(source, "SKILL.md"))) {
+    throw new Error(`bundled Skill not found at ${source}`);
   }
-
-  const targetDir = join(homedir(), ".claude", "skills", "neuroarxiv");
-  const target = join(targetDir, "SKILL.md");
-  mkdirSync(targetDir, { recursive: true });
-  copyFileSync(source, target);
-
-  console.log(`✓ Installed the neuroarxiv skill to ${target}`);
-  console.log(`  Restart Claude Code (or start a new session) and run /neuroarxiv "<problem>".`);
-}
-
-type Flags = {
-  problem: string;
-  context?: string;
-  categories?: string[];
-  papers?: number;
-  concurrency?: number;
-  sinceYears?: number;
-  json: boolean;
-  quiet: boolean;
-  model?: string;
-  criticModel?: string;
-};
-
-function positiveInt(raw: string, flag: string, max: number): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
-    console.error(`Error: ${flag} must be a positive integer, got "${raw}"`);
-    process.exit(1);
-  }
-  if (n > max) {
-    console.error(`Error: ${flag} must be at most ${max}, got ${n}`);
-    process.exit(1);
-  }
-  return n;
-}
-
-const MAX_CONTEXT_BYTES = 10 * 1024 * 1024; // 10 MB
-
-function parse(argv: string[]): Flags {
-  const f: Flags = { problem: "", json: false, quiet: false };
-  const rest: string[] = [];
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    switch (a) {
-      case "--categories": f.categories = argv[++i].split(",").map((s) => s.trim()).filter(Boolean); break;
-      case "--papers": f.papers = positiveInt(argv[++i], "--papers", 10); break;
-      case "--concurrency": f.concurrency = positiveInt(argv[++i], "--concurrency", 16); break;
-      case "--since-years": f.sinceYears = positiveInt(argv[++i], "--since-years", 100); break;
-      case "--context": {
-        const path = argv[++i];
-        const { size } = statSync(path);
-        if (size > MAX_CONTEXT_BYTES) {
-          console.error(`Error: context file is ${(size / 1024 / 1024).toFixed(1)} MB (max 10 MB)`);
-          process.exit(1);
-        }
-        f.context = readFileSync(path, "utf8");
-        break;
-      }
-      case "--model": f.model = argv[++i]; break;
-      case "--critic-model": f.criticModel = argv[++i]; break;
-      case "--json": f.json = true; break;
-      case "--quiet": f.quiet = true; break;
-      case "-h":
-      case "--help":
-        printHelp();
-        process.exit(0);
-      default:
-        rest.push(a);
+  for (const file of RUNTIME_FILES) {
+    if (!existsSync(join(runtime, file))) {
+      throw new Error("deterministic runtime is incomplete; run npm run build before installing");
     }
   }
-  f.problem = rest.join(" ").trim();
-  return f;
+
+  const destinationIndex = argv.indexOf("--destination");
+  const targetDir =
+    destinationIndex >= 0
+      ? argv[destinationIndex + 1]
+      : join(homedir(), ".claude", "skills", "neuroarxiv");
+  if (!targetDir) throw new Error("--destination requires an explicit Skill directory");
+
+  rmSync(targetDir, { recursive: true, force: true });
+  mkdirSync(targetDir, { recursive: true });
+  cpSync(source, targetDir, { recursive: true });
+  const runtimeTarget = join(targetDir, "runtime");
+  mkdirSync(runtimeTarget, { recursive: true });
+  for (const file of RUNTIME_FILES) {
+    copyFileSync(join(runtime, file), join(runtimeTarget, file));
+  }
+
+  console.log(`✓ Installed the complete neuroarxiv Skill to ${targetDir}`);
+  console.log("  Start a new Agent session and invoke neuroarxiv with one Build Problem.");
 }
 
-function printHelp() {
-  console.log(`neuroarxiv — a skill for coding agents
-
-  Before you build something new, read the arXiv first. Fans out isolated
-  reads across papers found category-wise via real arXiv search, scores and
-  clusters them, then converges on ONE recommended path — cited, with a
-  first step and known prior-art pitfalls to avoid — instead of a shortlist.
+function printHelp(): void {
+  console.log(`neuroarxiv — academic prior art for one open build decision
 
 USAGE
-  neuroarxiv install         drop the skill into ~/.claude/skills/neuroarxiv
-  neuroarxiv "<problem>" [flags]
+  neuroarxiv install [--destination PATH]
+  neuroarxiv search "<problem>" --categories A,B --terms "term one,term two"
 
-FLAGS
-  --categories A,B      pin arXiv category ids instead of auto-detecting
-                         (e.g. cs.DB,cs.DC); skips the category-select pass
-  --papers N             papers fetched per category (default 4)
-  --concurrency N        max parallel LLM read calls (default 4)
-  --since-years N        drop papers older than N years (default 8, 0 = no filter)
-  --context PATH         file to inject as context (code, constraints, stack)
-  --model NAME           override the SDK model (reader + synthesizer)
-  --critic-model NAME    override the model for score + cluster passes only
-  --json                 emit RunResult as JSON
-  --quiet                suppress progress events
-  -h, --help
+COMMANDS
+  install    install the complete Skill bundle (default: ~/.claude/skills/neuroarxiv)
+  search     collect bounded, normalized arXiv Research Evidence
 
-EXAMPLES
-  neuroarxiv "cache LLM completions across requests without staleness"
-  neuroarxiv "leader election for a queue with flaky nodes" --papers 6
-  neuroarxiv "..." --categories cs.DB,cs.DC --json > out.json
+Run neuroarxiv search --help for Search Plan flags.
 `);
 }
 
-async function main() {
-  if (process.argv[2] === "install") {
-    installSkill();
+async function main(): Promise<void> {
+  const command = process.argv[2];
+  if (command === "install") {
+    installSkill(process.argv.slice(3));
     return;
   }
-
-  const flags = parse(process.argv.slice(2));
-  if (!flags.problem) { printHelp(); process.exit(1); }
-
-  const onEvent = flags.quiet ? undefined : (e: RunEvent) => {
-    switch (e.kind) {
-      case "categories:done": process.stderr.write(`  ▸ categories: ${e.categories.join(", ")} | terms: ${e.terms.join(", ")}\n`); break;
-      case "fetch:done":      process.stderr.write(`    ${e.count} papers (${e.category})\n`); break;
-      case "read:start":      process.stderr.write(`  ◎ reading [${e.paperId}] ${e.title}\n`); break;
-      case "score:done":      process.stderr.write(`  scored ${e.total} readings\n`); break;
-      case "cluster:done":    process.stderr.write(`  ${e.clusters} clusters\n`); break;
-      case "converge:done":   process.stderr.write(`  → path: ${e.chosen ?? "(none)"}\n`); break;
-      case "warn":            process.stderr.write(`  ! ${e.message}\n`); break;
-    }
-  };
-
-  const opts: RunOptions = {
-    problem: flags.problem,
-    context: flags.context,
-    categories: flags.categories,
-    papersPerCategory: flags.papers,
-    concurrency: flags.concurrency,
-    sinceYears: flags.sinceYears,
-    model: flags.model,
-    criticModel: flags.criticModel,
-    onEvent,
-  };
-
-  const result = await run(opts);
-
-  if (flags.json) {
-    process.stdout.write(JSON.stringify(result, null, 2) + "\n");
-  } else {
-    process.stdout.write(renderText(result) + "\n");
+  if (command === "search") {
+    await searchEvidence(process.argv.slice(3));
+    return;
   }
+  if (command === "-h" || command === "--help" || command === undefined) {
+    printHelp();
+    return;
+  }
+  if (command === "search-help") {
+    printSearchHelp();
+    return;
+  }
+  throw new Error(`unknown command: ${command}`);
 }
 
-main().catch((e) => {
-  console.error(e);
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : error);
   process.exit(1);
 });
