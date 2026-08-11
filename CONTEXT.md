@@ -44,6 +44,14 @@ _Avoid_: Missing finding, silent drop
 Evidence grounded in a Paper that supports claims about a mechanism, its evaluation, and its reported limitations.
 _Avoid_: Documentation Evidence, implementation example
 
+**Retrieval Owner**:
+The single active helper process responsible for collecting and publishing Research Evidence for one Research Run.
+_Avoid_: Retry worker, duplicate command
+
+**Evidence Artifact**:
+The immutable JSON file atomically published by the Retrieval Owner and reused verbatim for the remainder of the Research Run.
+_Avoid_: Stdout capture, partial result, search log
+
 **Documentation Evidence**:
 Version-specific documentation or examples for a known dependency that support claims about its current, intended use.
 _Avoid_: Prior art, mechanism validation, implementation proof

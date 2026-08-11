@@ -2,7 +2,7 @@ const ARXIV_API = "https://export.arxiv.org/api/query";
 const DEFAULT_REQUEST_DELAY_MS = 3000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_RETRIES = 1;
-const USER_AGENT = "neuroarxiv-skill/0.2 (+https://github.com/vonbai/neuroarxiv-skill)";
+const USER_AGENT = "neuroarxiv-skill/0.3.1 (+https://github.com/vonbai/neuroarxiv-skill)";
 function defaultSleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }

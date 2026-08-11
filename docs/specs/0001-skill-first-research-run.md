@@ -48,6 +48,8 @@ Research Evidence from arXiv is the product's core evidence. Documentation Evide
 30. As a maintainer, I want the installed Skill bundle to include every required reference, so that installation cannot silently omit part of the workflow.
 31. As a reviewer, I want every retained Paper to have one finding or explicit exclusion, so that unread evidence cannot disappear from the Research Run.
 32. As a user of multiple coding Agents, I want one canonical Skill copy with Agent-specific links and one removal command, so that installs cannot drift or leave unowned files behind.
+33. As an Agent using an execution tool that yields before a long command exits, I want to resume the same Retrieval Owner, so that an empty initial output chunk cannot trigger duplicate arXiv requests.
+34. As a caller consuming structured Research Evidence, I want one atomically published Evidence Artifact, so that partial stdout, concurrent retries, and overwritten results cannot become competing sources of truth.
 
 ## Implementation Decisions
 
@@ -77,6 +79,9 @@ Research Evidence from arXiv is the product's core evidence. Documentation Evide
 - The standard Skills CLI owns install, update, Agent symlinks, lock state, and removal. The repository ships one self-contained Skill bundle and no second installer.
 - The committed Skill runtime is a generated projection of the TypeScript source. CI rejects a stale projection so it cannot become a second implementation owner.
 - Historical evaluations remain historical evidence. Current product documentation must distinguish claims measured against the former implementation from guarantees of the revised implementation.
+- For the Skill journey, one helper process is the Retrieval Owner for one fresh Evidence Artifact path. A short-lived adjacent ownership marker rejects a second process before it can contact arXiv.
+- The Retrieval Owner reports liveness through stderr and atomically publishes the complete JSON file after collection. The Evidence Artifact, rather than captured stdout or the ownership marker, is the single source of truth for subsequent readings and validation.
+- A yielded execution handle means the Retrieval Owner is still active. The caller resumes that exact handle until an exit status is available and only performs bounded recovery after the original process is confirmed stopped.
 
 ## Testing Decisions
 
@@ -88,6 +93,8 @@ Research Evidence from arXiv is the product's core evidence. Documentation Evide
 - Given citations that reference unknown Paper identities, validation must reject the Evidence Chain without inventing metadata.
 - Given more than twelve abstract readings or more than three full-text readings under the default budget, validation must reject the run unless an explicit caller budget override is recorded.
 - Given two readings that share sibling Paper content, the Skill's conformance evaluation must treat isolation as broken and require a bounded re-read or an incomplete result.
+- Given a delayed collection, the CLI test must observe an ownership marker and no final Evidence Artifact before completion, then exactly one complete JSON artifact after completion.
+- Given a second command using an active or completed Evidence Artifact path, the CLI test must reject it before another collection starts or existing evidence is overwritten.
 - Given a complete Research Run, conformance evaluation must observe exactly one Recommended Path, visible Alternate Paths where applicable, Prior-Art Pitfalls, Evidence Depth, Evidence Coverage, and Open Threads.
 - Given an explicit invocation, conformance evaluation must observe that the run starts. Given an implicit trivial or already-converged task, it must observe that the Skill stays out of the way.
 - The package contract test must verify that no Claude SDK, internal LLM runtime, provider credential, or model flag remains in production dependencies or public usage.

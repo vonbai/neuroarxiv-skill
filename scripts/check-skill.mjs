@@ -30,6 +30,12 @@ for (const match of skill.matchAll(/\]\((references\/[^)]+)\)/g)) {
 requireCondition(existsSync(join(skillDir, "scripts", "search.mjs")), "missing deterministic search wrapper");
 requireCondition(existsSync(join(skillDir, "scripts", "validate.mjs")), "missing deterministic validation wrapper");
 requireCondition(existsSync(join(skillDir, "agents", "openai.yaml")), "missing Agent metadata");
+requireCondition(
+  skill.includes('--output "$evidence_file"') &&
+    skill.includes("continue that same handle") &&
+    /Evidence Artifact is the single source of\s+truth/.test(skill),
+  "Skill must preserve the single-owner Evidence Artifact journey",
+);
 for (const file of [...RUNTIME_FILES, "package.json"]) {
   requireCondition(existsSync(join(skillDir, "runtime", file)), `missing Skill runtime file: ${file}`);
 }

@@ -1,6 +1,6 @@
 {
   "name": "neuroarxiv-skill",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A Skill-first Research Run that turns arXiv prior art into one actionable path for an open technical mechanism.",
   "type": "module",
   "main": "dist/index.js",

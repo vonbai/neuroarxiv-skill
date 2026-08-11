@@ -1,8 +1,9 @@
 # Research Run artifact contract
 
-Use this structure only when Step 8 validates the completed Research Run. Reuse
-the `researchEvidence` object emitted by `scripts/search.mjs`; do not reconstruct
-Paper metadata.
+Use this structure only when Step 8 validates the completed Research Run. Load
+the `researchEvidence` object verbatim from the atomically published Evidence
+Artifact created in Step 4; do not reconstruct Paper metadata or substitute
+captured stdout.
 
 ```json
 {

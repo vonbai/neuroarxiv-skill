@@ -62,17 +62,34 @@ mechanism, and the expansion remains relevant to the same Build Problem.
 Resolve paths relative to this Skill directory and run the bundled helper:
 
 ```bash
+evidence_dir="$(mktemp -d)"
+evidence_file="$evidence_dir/research-evidence.json"
 node scripts/search.mjs "<build problem>" \
   --categories "<cat1>=<reason1>,<cat2>=<reason2>" \
   --terms "<term1>,<term2>" \
   --expand-terms "<broader-term1>,<broader-term2>" \
-  --json
+  --output "$evidence_file"
 ```
 
 Omit `--expand-terms` when no honest expansion exists. Add `--since-years 0`
 only when older work is relevant; otherwise use the eight-year default. When the
 caller explicitly overrides the full-text budget, pass
 `--max-full-text-papers <count>` so the emitted Research Evidence records it.
+
+Start this helper exactly once for the Research Run. It becomes the Retrieval
+Owner for the fresh Evidence Artifact path before contacting arXiv and reports
+liveness on stderr. When the execution tool returns a running process, session,
+cell, or handle, continue that same handle until it reports an exit status. An
+empty stdout chunk is not completion. After exit status 0, read
+`$evidence_file`; reuse its complete JSON value verbatim as the final Research
+Run's `researchEvidence` object. The Evidence Artifact is the single source of
+truth, not stdout or the adjacent `.pending` ownership marker.
+
+A second process using the same path is rejected before retrieval. If the
+original process is externally interrupted, first confirm that it has stopped;
+then remove its stale `.pending` marker and perform bounded recovery with the
+same Search Plan. A handled failure releases the marker itself. Never launch a
+replacement while the original execution handle remains live.
 
 The helper owns sequential requests, courtesy delay, submitted-date constraints,
 bounded retry, exact Paper versions, metadata normalization, category merging,
@@ -84,8 +101,9 @@ package once and rerun the same helper. If arXiv remains unavailable after its
 bounded recovery, return an Incomplete Research Run. Do not install or probe
 unrelated capabilities as recovery.
 
-**Completion criterion:** obtain a version-identifiable Paper set and retrieval
-coverage, or declare the Research Evidence unavailable.
+**Completion criterion:** the one Retrieval Owner has exited and its complete
+Evidence Artifact is readable, with a version-identifiable Paper set and
+retrieval coverage or an explicit unavailable status.
 
 ## 5. Make Isolated Readings
 
@@ -168,13 +186,13 @@ claim resolves to the Evidence Chain that supports it.
 
 Assemble the structured artifact defined in
 [references/research-run-artifact.md](references/research-run-artifact.md), write
-it to an operating-system temporary JSON file, and run:
+it to a second operating-system temporary JSON file, and run:
 
 ```bash
 node scripts/validate.mjs <temporary-research-run.json>
 ```
 
-Remove the temporary file after validation. For Complete or Thin Coverage, fix
+Remove both temporary files after validation. For Complete or Thin Coverage, fix
 every reported structural error within the existing budget before reporting. For
 an Incomplete Research Run, preserve the validator errors as the explicit failure
 reason; never erase broken isolation or an Evidence Chain to make validation pass.

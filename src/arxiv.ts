@@ -5,7 +5,7 @@ const DEFAULT_REQUEST_DELAY_MS = 3000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_RETRIES = 1;
 const USER_AGENT =
-  "neuroarxiv-skill/0.2 (+https://github.com/vonbai/neuroarxiv-skill)";
+  "neuroarxiv-skill/0.3.1 (+https://github.com/vonbai/neuroarxiv-skill)";
 
 type FetchLike = typeof fetch;
 

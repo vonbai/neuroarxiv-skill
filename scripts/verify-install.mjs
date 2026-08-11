@@ -26,7 +26,8 @@ const sourceSmoke = spawnSync(
 );
 if (
   sourceSmoke.status !== 0 ||
-  !sourceSmoke.stdout.includes("caller-selected arXiv categories and reasons")
+  !sourceSmoke.stdout.includes("caller-selected arXiv categories and reasons") ||
+  !sourceSmoke.stdout.includes("atomically publish JSON instead")
 ) {
   throw new Error(sourceSmoke.stderr || "self-contained Skill helper failed its smoke check");
 }
@@ -158,7 +159,8 @@ try {
   );
   if (
     installedSmoke.status !== 0 ||
-    !installedSmoke.stdout.includes("caller-selected arXiv categories and reasons")
+    !installedSmoke.stdout.includes("caller-selected arXiv categories and reasons") ||
+    !installedSmoke.stdout.includes("atomically publish JSON instead")
   ) {
     throw new Error(installedSmoke.stderr || "installed search wrapper failed its smoke check");
   }

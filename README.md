@@ -93,16 +93,22 @@ Agents or scripts can collect the same normalized Research Evidence without
 semantic inference:
 
 ```bash
+evidence_dir="$(mktemp -d)"
+evidence_file="$evidence_dir/research-evidence.json"
 npx github:vonbai/neuroarxiv-skill search \
   "cache invalidation across concurrent writers" \
   --categories "cs.DB=durable deduplication,cs.DC=distributed coordination" \
   --terms "cache invalidation,cache coherence" \
   --expand-terms "distributed cache consistency" \
-  --json
+  --output "$evidence_file"
 ```
 
 The caller must supply the Search Plan. The adapter does not select categories,
-score Papers, cluster Architectural Angles, or choose a path.
+score Papers, cluster Architectural Angles, or choose a path. It claims the
+fresh output path before retrieval, reports liveness on stderr, and atomically
+publishes one complete JSON Evidence Artifact. Resume the same process when an
+execution tool yields; read the file only after exit status 0. The `--json` flag
+remains available for synchronous callers that deliberately consume stdout.
 
 ## Architecture
 
