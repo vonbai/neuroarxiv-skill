@@ -109,7 +109,7 @@ export function createResearchEvidenceCollector(gateway: ArxivGateway = createAr
 
     const categories = normalizeCategories(request.searchPlan.categories);
     const terms = uniqueStrings(request.searchPlan.terms, "searchPlan.terms", 12);
-    const expansionTerms = request.searchPlan.expansionTerms
+    const expansionTerms = request.searchPlan.expansionTerms?.length
       ? uniqueStrings(request.searchPlan.expansionTerms, "searchPlan.expansionTerms", 12)
       : [];
     const sinceYears = boundedInteger(
@@ -236,8 +236,8 @@ export function collectResearchEvidence(
   return defaultCollector(request);
 }
 
-function requireText(value: string, path: string, errors: string[]): void {
-  if (!value.trim()) errors.push(`${path} must not be empty`);
+function requireText(value: unknown, path: string, errors: string[]): void {
+  if (typeof value !== "string" || !value.trim()) errors.push(`${path} must not be empty`);
 }
 
 function validateCitation(
@@ -245,14 +245,29 @@ function validateCitation(
   path: string,
   paperVersions: Set<string>,
   findingVersions: Set<string>,
+  documentationEvidence: ResearchRunArtifact["documentationEvidence"],
   errors: string[],
 ): void {
-  if (!paperVersions.has(citation.paperVersion)) {
-    errors.push(`${path} references unknown Paper version ${citation.paperVersion}`);
-  } else if (!findingVersions.has(citation.paperVersion)) {
-    errors.push(`${path} references a Paper without a Prior-Art Finding`);
-  }
   requireText(citation.role, `${path}.role`, errors);
+  if (citation.source === "paper") {
+    if (!paperVersions.has(citation.paperVersion)) {
+      errors.push(`${path} references unknown Paper version ${citation.paperVersion}`);
+    } else if (!findingVersions.has(citation.paperVersion)) {
+      errors.push(`${path} references a Paper without a Prior-Art Finding`);
+    }
+    return;
+  }
+  if (citation.source !== "documentation") {
+    errors.push(`${path}.source must be paper or documentation`);
+    return;
+  }
+
+  requireText(citation.sourceIdentity, `${path}.sourceIdentity`, errors);
+  if (documentationEvidence.status !== "used") {
+    errors.push(`${path} references Documentation Evidence not recorded as used`);
+  } else if (citation.sourceIdentity !== documentationEvidence.sourceIdentity) {
+    errors.push(`${path} does not match the recorded Documentation Evidence source`);
+  }
 }
 
 function validateFinding(
@@ -290,8 +305,286 @@ function validateAngle(
   }
 }
 
-export function validateResearchRun(run: ResearchRunArtifact): ResearchRunValidation {
+type JsonObject = Record<string, unknown>;
+
+function expectObject(value: unknown, path: string, errors: string[]): JsonObject | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    errors.push(`${path} must be an object`);
+    return null;
+  }
+  return value as JsonObject;
+}
+
+function expectArray(value: unknown, path: string, errors: string[]): unknown[] | null {
+  if (!Array.isArray(value)) {
+    errors.push(`${path} must be an array`);
+    return null;
+  }
+  return value;
+}
+
+function expectString(value: unknown, path: string, errors: string[]): void {
+  if (typeof value !== "string") errors.push(`${path} must be a string`);
+}
+
+function expectBoolean(value: unknown, path: string, errors: string[]): void {
+  if (typeof value !== "boolean") errors.push(`${path} must be a boolean`);
+}
+
+function expectInteger(
+  value: unknown,
+  path: string,
+  errors: string[],
+  min = Number.MIN_SAFE_INTEGER,
+  max = Number.MAX_SAFE_INTEGER,
+): void {
+  if (!Number.isInteger(value) || (value as number) < min || (value as number) > max) {
+    errors.push(`${path} must be an integer between ${min} and ${max}`);
+  }
+}
+
+function expectEnum(
+  value: unknown,
+  allowed: readonly string[],
+  path: string,
+  errors: string[],
+): void {
+  if (typeof value !== "string" || !allowed.includes(value)) {
+    errors.push(`${path} must be one of: ${allowed.join(", ")}`);
+  }
+}
+
+function expectStringArray(value: unknown, path: string, errors: string[]): void {
+  const values = expectArray(value, path, errors);
+  values?.forEach((item, index) => expectString(item, `${path}[${index}]`, errors));
+}
+
+function validateResearchRunShape(input: unknown, errors: string[]): input is ResearchRunArtifact {
+  const run = expectObject(input, "Research Run", errors);
+  if (!run) return false;
+
+  expectEnum(run.status, ["complete", "thin", "incomplete"], "status", errors);
+  expectString(run.problem, "problem", errors);
+
+  const evidence = expectObject(run.researchEvidence, "researchEvidence", errors);
+  if (evidence) {
+    expectString(evidence.problem, "researchEvidence.problem", errors);
+    const searchPlan = expectObject(evidence.searchPlan, "researchEvidence.searchPlan", errors);
+    if (searchPlan) {
+      const categories = expectArray(
+        searchPlan.categories,
+        "researchEvidence.searchPlan.categories",
+        errors,
+      );
+      categories?.forEach((item, index) => {
+        const category = expectObject(
+          item,
+          `researchEvidence.searchPlan.categories[${index}]`,
+          errors,
+        );
+        if (category) {
+          expectString(category.id, `researchEvidence.searchPlan.categories[${index}].id`, errors);
+          expectString(category.why, `researchEvidence.searchPlan.categories[${index}].why`, errors);
+        }
+      });
+      expectStringArray(searchPlan.terms, "researchEvidence.searchPlan.terms", errors);
+      expectStringArray(
+        searchPlan.expansionTerms,
+        "researchEvidence.searchPlan.expansionTerms",
+        errors,
+      );
+      expectInteger(searchPlan.sinceYears, "researchEvidence.searchPlan.sinceYears", errors, 0, 100);
+    }
+
+    const budget = expectObject(evidence.budget, "researchEvidence.budget", errors);
+    if (budget) {
+      expectInteger(budget.maxPapers, "researchEvidence.budget.maxPapers", errors, 1, 100);
+      expectInteger(
+        budget.maxFullTextPapers,
+        "researchEvidence.budget.maxFullTextPapers",
+        errors,
+        0,
+        20,
+      );
+      expectInteger(
+        budget.papersPerCategory,
+        "researchEvidence.budget.papersPerCategory",
+        errors,
+        1,
+        25,
+      );
+      expectInteger(budget.maxExpansions, "researchEvidence.budget.maxExpansions", errors, 0, 1);
+    }
+
+    const papers = expectArray(evidence.papers, "researchEvidence.papers", errors);
+    papers?.forEach((item, index) => {
+      const paper = expectObject(item, `researchEvidence.papers[${index}]`, errors);
+      if (!paper) return;
+      for (const field of [
+        "id",
+        "version",
+        "title",
+        "summary",
+        "published",
+        "updated",
+        "absUrl",
+        "pdfUrl",
+      ]) {
+        expectString(paper[field], `researchEvidence.papers[${index}].${field}`, errors);
+      }
+      expectStringArray(paper.authors, `researchEvidence.papers[${index}].authors`, errors);
+      expectStringArray(paper.categories, `researchEvidence.papers[${index}].categories`, errors);
+    });
+
+    const attempts = expectArray(evidence.attempts, "researchEvidence.attempts", errors);
+    attempts?.forEach((item, index) => {
+      const attempt = expectObject(item, `researchEvidence.attempts[${index}]`, errors);
+      if (!attempt) return;
+      expectEnum(
+        attempt.phase,
+        ["initial", "expansion"],
+        `researchEvidence.attempts[${index}].phase`,
+        errors,
+      );
+      expectString(attempt.category, `researchEvidence.attempts[${index}].category`, errors);
+      expectStringArray(attempt.terms, `researchEvidence.attempts[${index}].terms`, errors);
+      expectInteger(
+        attempt.paperCount,
+        `researchEvidence.attempts[${index}].paperCount`,
+        errors,
+        0,
+      );
+      if (attempt.failure !== undefined) {
+        expectString(attempt.failure, `researchEvidence.attempts[${index}].failure`, errors);
+      }
+    });
+    expectBoolean(evidence.expansionUsed, "researchEvidence.expansionUsed", errors);
+    const coverage = expectObject(evidence.coverage, "researchEvidence.coverage", errors);
+    if (coverage) {
+      expectEnum(
+        coverage.status,
+        ["ready", "thin", "unavailable"],
+        "researchEvidence.coverage.status",
+        errors,
+      );
+      expectString(coverage.reason, "researchEvidence.coverage.reason", errors);
+    }
+  }
+
+  const findings = expectArray(run.findings, "findings", errors);
+  findings?.forEach((item, index) => {
+    const finding = expectObject(item, `findings[${index}]`, errors);
+    if (!finding) return;
+    expectString(finding.paperVersion, `findings[${index}].paperVersion`, errors);
+    expectEnum(
+      finding.evidenceDepth,
+      ["abstract", "full-text"],
+      `findings[${index}].evidenceDepth`,
+      errors,
+    );
+    expectEnum(
+      finding.isolationStatus,
+      ["isolated", "recovered", "broken"],
+      `findings[${index}].isolationStatus`,
+      errors,
+    );
+    for (const field of ["approach", "borrow", "limitation", "relevanceNote"]) {
+      expectString(finding[field], `findings[${index}].${field}`, errors);
+    }
+  });
+
+  const exclusions = expectArray(run.excludedPapers, "excludedPapers", errors);
+  exclusions?.forEach((item, index) => {
+    const exclusion = expectObject(item, `excludedPapers[${index}]`, errors);
+    if (exclusion) {
+      expectString(exclusion.paperVersion, `excludedPapers[${index}].paperVersion`, errors);
+      expectString(exclusion.reason, `excludedPapers[${index}].reason`, errors);
+    }
+  });
+
+  const angles = expectArray(run.angles, "angles", errors);
+  angles?.forEach((item, index) => {
+    const angle = expectObject(item, `angles[${index}]`, errors);
+    if (angle) {
+      expectString(angle.label, `angles[${index}].label`, errors);
+      expectStringArray(angle.paperVersions, `angles[${index}].paperVersions`, errors);
+    }
+  });
+
+  if (run.recommendedPath !== null) {
+    const path = expectObject(run.recommendedPath, "recommendedPath", errors);
+    if (path) {
+      for (const field of ["angle", "sketch", "firstStep", "loadBearingRisk"]) {
+        expectString(path[field], `recommendedPath.${field}`, errors);
+      }
+      const citations = expectArray(path.citations, "recommendedPath.citations", errors);
+      citations?.forEach((item, index) => {
+        const citation = expectObject(item, `recommendedPath.citations[${index}]`, errors);
+        if (!citation) return;
+        expectEnum(
+          citation.source,
+          ["paper", "documentation"],
+          `recommendedPath.citations[${index}].source`,
+          errors,
+        );
+        expectString(citation.role, `recommendedPath.citations[${index}].role`, errors);
+        if (citation.source === "paper") {
+          expectString(
+            citation.paperVersion,
+            `recommendedPath.citations[${index}].paperVersion`,
+            errors,
+          );
+        } else if (citation.source === "documentation") {
+          expectString(
+            citation.sourceIdentity,
+            `recommendedPath.citations[${index}].sourceIdentity`,
+            errors,
+          );
+        }
+      });
+    }
+  }
+
+  const alternates = expectArray(run.alternates, "alternates", errors);
+  alternates?.forEach((item, index) => {
+    const alternate = expectObject(item, `alternates[${index}]`, errors);
+    if (alternate) {
+      expectString(alternate.angle, `alternates[${index}].angle`, errors);
+      expectString(alternate.tradeOff, `alternates[${index}].tradeOff`, errors);
+    }
+  });
+
+  const pitfalls = expectArray(run.pitfalls, "pitfalls", errors);
+  pitfalls?.forEach((item, index) => {
+    const pitfall = expectObject(item, `pitfalls[${index}]`, errors);
+    if (pitfall) {
+      expectString(pitfall.paperVersion, `pitfalls[${index}].paperVersion`, errors);
+      expectString(pitfall.risk, `pitfalls[${index}].risk`, errors);
+    }
+  });
+  expectStringArray(run.openThreads, "openThreads", errors);
+
+  const documentation = expectObject(run.documentationEvidence, "documentationEvidence", errors);
+  if (documentation) {
+    expectEnum(
+      documentation.status,
+      ["used", "not-needed", "unavailable"],
+      "documentationEvidence.status",
+      errors,
+    );
+    expectString(documentation.reason, "documentationEvidence.reason", errors);
+    if (documentation.sourceIdentity !== undefined) {
+      expectString(documentation.sourceIdentity, "documentationEvidence.sourceIdentity", errors);
+    }
+  }
+
+  return errors.length === 0;
+}
+
+export function validateResearchRun(input: unknown): ResearchRunValidation {
   const errors: string[] = [];
+  if (!validateResearchRunShape(input, errors)) return { valid: false, errors };
+  const run = input;
   requireText(run.problem, "problem", errors);
   if (run.problem.trim() !== run.researchEvidence.problem.trim()) {
     errors.push("problem must match researchEvidence.problem");
@@ -313,6 +606,24 @@ export function validateResearchRun(run: ResearchRunArtifact): ResearchRunValida
   if (!run.researchEvidence.expansionUsed && expansionAttempts.length > 0) {
     errors.push("expansion attempts require expansionUsed");
   }
+  if (run.researchEvidence.expansionUsed && run.researchEvidence.budget.maxExpansions === 0) {
+    errors.push("expansionUsed exceeds the recorded expansion budget");
+  }
+  if (run.researchEvidence.expansionUsed && run.researchEvidence.searchPlan.expansionTerms.length === 0) {
+    errors.push("expansionUsed requires caller-authored expansion terms");
+  }
+
+  const coverage = run.researchEvidence.coverage.status;
+  const paperCount = run.researchEvidence.papers.length;
+  if (coverage === "unavailable" && paperCount !== 0) {
+    errors.push("unavailable Research Evidence cannot contain Papers");
+  }
+  if (coverage === "thin" && (paperCount === 0 || paperCount >= READY_PAPER_COUNT)) {
+    errors.push(`thin Research Evidence requires 1-${READY_PAPER_COUNT - 1} Papers`);
+  }
+  if (coverage === "ready" && paperCount < READY_PAPER_COUNT) {
+    errors.push(`ready Research Evidence requires at least ${READY_PAPER_COUNT} Papers`);
+  }
 
   const findingVersions = new Set<string>();
   run.findings.forEach((finding, index) => {
@@ -322,6 +633,30 @@ export function validateResearchRun(run: ResearchRunArtifact): ResearchRunValida
     }
     findingVersions.add(finding.paperVersion);
   });
+  const excludedVersions = new Set<string>();
+  const excludedPapers = Array.isArray(run.excludedPapers) ? run.excludedPapers : [];
+  if (!Array.isArray(run.excludedPapers)) {
+    errors.push("excludedPapers must be an array");
+  }
+  excludedPapers.forEach((excluded, index) => {
+    const path = `excludedPapers[${index}]`;
+    if (!paperVersions.has(excluded.paperVersion)) {
+      errors.push(`${path} references unknown Paper version ${excluded.paperVersion}`);
+    }
+    if (findingVersions.has(excluded.paperVersion)) {
+      errors.push(`${path} cannot exclude a Paper that has a Prior-Art Finding`);
+    }
+    if (excludedVersions.has(excluded.paperVersion)) {
+      errors.push(`excludedPapers contains duplicate Paper version ${excluded.paperVersion}`);
+    }
+    requireText(excluded.reason, `${path}.reason`, errors);
+    excludedVersions.add(excluded.paperVersion);
+  });
+  for (const version of paperVersions) {
+    if (!findingVersions.has(version) && !excludedVersions.has(version)) {
+      errors.push(`Paper ${version} has no finding or exclusion`);
+    }
+  }
   const fullTextCount = run.findings.filter(
     (finding) => finding.evidenceDepth === "full-text",
   ).length;
@@ -343,8 +678,27 @@ export function validateResearchRun(run: ResearchRunArtifact): ResearchRunValida
   } else if (run.recommendedPath === null) {
     errors.push(`${run.status} Research Run requires one Recommended Path`);
   }
-  if (run.status === "complete" && run.researchEvidence.coverage.status === "unavailable") {
-    errors.push("complete Research Run requires available Research Evidence");
+  const usableFindingCount = run.findings.filter(
+    (finding) =>
+      paperVersions.has(finding.paperVersion) && finding.isolationStatus !== "broken",
+  ).length;
+  if (
+    run.status === "complete" &&
+    (coverage !== "ready" || usableFindingCount < READY_PAPER_COUNT)
+  ) {
+    errors.push(
+      `Complete Research Run requires ready Research Evidence and at least ${READY_PAPER_COUNT} usable findings`,
+    );
+  }
+  if (
+    run.status === "thin" &&
+    (coverage === "unavailable" ||
+      usableFindingCount === 0 ||
+      usableFindingCount >= READY_PAPER_COUNT)
+  ) {
+    errors.push(
+      `Thin Coverage Research Run requires available Research Evidence and 1-${READY_PAPER_COUNT - 1} usable findings`,
+    );
   }
 
   if (run.recommendedPath) {
@@ -367,6 +721,7 @@ export function validateResearchRun(run: ResearchRunArtifact): ResearchRunValida
         `recommendedPath.citations[${index}]`,
         paperVersions,
         findingVersions,
+        run.documentationEvidence,
         errors,
       ),
     );

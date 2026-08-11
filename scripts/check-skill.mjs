@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { RUNTIME_FILES } from "./runtime-contract.mjs";
+import { SKILLS_CLI_VERSION } from "./install-contract.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const skillDir = join(root, "skills", "neuroarxiv");
@@ -26,7 +28,11 @@ for (const match of skill.matchAll(/\]\((references\/[^)]+)\)/g)) {
   requireCondition(existsSync(join(skillDir, match[1])), `missing Skill reference: ${match[1]}`);
 }
 requireCondition(existsSync(join(skillDir, "scripts", "search.mjs")), "missing deterministic search wrapper");
+requireCondition(existsSync(join(skillDir, "scripts", "validate.mjs")), "missing deterministic validation wrapper");
 requireCondition(existsSync(join(skillDir, "agents", "openai.yaml")), "missing Agent metadata");
+for (const file of [...RUNTIME_FILES, "package.json"]) {
+  requireCondition(existsSync(join(skillDir, "runtime", file)), `missing Skill runtime file: ${file}`);
+}
 
 const metadata = readFileSync(join(skillDir, "agents", "openai.yaml"), "utf8");
 requireCondition(/display_name: "NeuroArxiv"/.test(metadata), "Agent display name is stale");
@@ -35,6 +41,16 @@ requireCondition(/default_prompt: "Use \$neuroarxiv /.test(metadata), "default p
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 requireCondition(!packageJson.dependencies, "production dependencies must stay empty");
 requireCondition(packageJson.name === "neuroarxiv-skill", "package identity is stale");
+
+const readme = readFileSync(join(root, "README.md"), "utf8");
+requireCondition(
+  readme.includes(`npx skills@${SKILLS_CLI_VERSION} add vonbai/neuroarxiv-skill`),
+  "README install command must use the verified Skills CLI version",
+);
+requireCondition(
+  readme.includes(`npx skills@${SKILLS_CLI_VERSION} remove --global neuroarxiv --yes`),
+  "README removal command must use the verified Skills CLI version",
+);
 
 const productionFiles = [
   "src/arxiv.ts",

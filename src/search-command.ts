@@ -7,6 +7,7 @@ type SearchFlags = {
   terms: string[];
   expansionTerms: string[];
   maxPapers?: number;
+  maxFullTextPapers?: number;
   papersPerCategory?: number;
   sinceYears?: number;
   json: boolean;
@@ -16,10 +17,10 @@ function fail(message: string): never {
   throw new Error(message);
 }
 
-function boundedInteger(raw: string | undefined, flag: string, min: number, max: number): number {
+function integerFlag(raw: string | undefined, flag: string): number {
   const value = Number(raw);
-  if (!Number.isInteger(value) || value < min || value > max) {
-    fail(`${flag} must be an integer between ${min} and ${max}, got "${raw}"`);
+  if (!Number.isInteger(value)) {
+    fail(`${flag} must be an integer, got "${raw}"`);
   }
   return value;
 }
@@ -29,6 +30,15 @@ function commaList(raw: string | undefined, flag: string): string[] {
   return raw.split(",").map((value) => value.trim()).filter(Boolean);
 }
 
+function categoryList(raw: string | undefined): SearchCategory[] {
+  return commaList(raw, "--categories").map((entry) => {
+    const separator = entry.indexOf("=");
+    const id = (separator === -1 ? entry : entry.slice(0, separator)).trim();
+    const why = (separator === -1 ? "caller-selected" : entry.slice(separator + 1)).trim();
+    return { id, why: why || "caller-selected" };
+  });
+}
+
 export function printSearchHelp(): void {
   console.log(`neuroarxiv search — collect bounded arXiv Research Evidence
 
@@ -36,10 +46,12 @@ USAGE
   neuroarxiv search "<problem>" --categories A,B --terms "term one,term two"
 
 FLAGS
-  --categories A,B           caller-selected arXiv category ids
+  --categories A=reason,B=reason
+                             caller-selected arXiv categories and reasons
   --terms A,B                caller-selected mechanism terms
   --expand-terms A,B         one caller-selected bounded expansion
   --max-papers N             retained Paper budget (default 12)
+  --max-full-text-papers N   full-text reading budget (default 3)
   --papers-per-category N    requested per category (default 4)
   --since-years N            submitted-date window (default 8, 0 = no filter)
   --json                     emit Research Evidence as JSON
@@ -47,7 +59,7 @@ FLAGS
 `);
 }
 
-function parseSearch(argv: string[]): SearchFlags | null {
+export function parseSearch(argv: string[]): SearchFlags | null {
   const flags: SearchFlags = {
     problem: "",
     categories: [],
@@ -60,10 +72,7 @@ function parseSearch(argv: string[]): SearchFlags | null {
     const arg = argv[i];
     switch (arg) {
       case "--categories":
-        flags.categories = commaList(argv[++i], "--categories").map((id) => ({
-          id,
-          why: "caller-selected",
-        }));
+        flags.categories = categoryList(argv[++i]);
         break;
       case "--terms":
         flags.terms = commaList(argv[++i], "--terms");
@@ -72,18 +81,16 @@ function parseSearch(argv: string[]): SearchFlags | null {
         flags.expansionTerms = commaList(argv[++i], "--expand-terms");
         break;
       case "--max-papers":
-        flags.maxPapers = boundedInteger(argv[++i], "--max-papers", 1, 100);
+        flags.maxPapers = integerFlag(argv[++i], "--max-papers");
+        break;
+      case "--max-full-text-papers":
+        flags.maxFullTextPapers = integerFlag(argv[++i], "--max-full-text-papers");
         break;
       case "--papers-per-category":
-        flags.papersPerCategory = boundedInteger(
-          argv[++i],
-          "--papers-per-category",
-          1,
-          25,
-        );
+        flags.papersPerCategory = integerFlag(argv[++i], "--papers-per-category");
         break;
       case "--since-years":
-        flags.sinceYears = boundedInteger(argv[++i], "--since-years", 0, 100);
+        flags.sinceYears = integerFlag(argv[++i], "--since-years");
         break;
       case "--json":
         flags.json = true;
@@ -112,11 +119,12 @@ export async function searchEvidence(argv: string[]): Promise<void> {
     searchPlan: {
       categories: flags.categories,
       terms: flags.terms,
-      expansionTerms: flags.expansionTerms,
+      ...(flags.expansionTerms.length > 0 ? { expansionTerms: flags.expansionTerms } : {}),
       sinceYears: flags.sinceYears,
     },
     budget: {
       maxPapers: flags.maxPapers,
+      maxFullTextPapers: flags.maxFullTextPapers,
       papersPerCategory: flags.papersPerCategory,
     },
   };

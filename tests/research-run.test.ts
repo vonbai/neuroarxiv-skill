@@ -91,6 +91,34 @@ test("Research Run performs one caller-authored expansion when coverage is thin"
   assert.equal(result.coverage.status, "ready");
 });
 
+test("Research Run accepts an omitted or empty expansion plan", async () => {
+  const calls: ArxivSearch[] = [];
+  const gateway: ArxivGateway = {
+    async search(input) {
+      calls.push(input);
+      return [
+        paper("2601.00001", "2601.00001v1", input.category),
+        paper("2601.00002", "2601.00002v1", input.category),
+        paper("2601.00003", "2601.00003v1", input.category),
+      ];
+    },
+  };
+
+  const result = await createResearchEvidenceCollector(gateway)(
+    request({
+      searchPlan: {
+        categories: [{ id: "cs.DB", why: "database consistency" }],
+        terms: ["cache invalidation"],
+        expansionTerms: [],
+      },
+    }),
+  );
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(result.searchPlan.expansionTerms, []);
+  assert.equal(result.expansionUsed, false);
+});
+
 test("Research Run caps retained Papers at the default budget", async () => {
   const gateway: ArxivGateway = {
     async search(input) {
@@ -174,9 +202,19 @@ async function completeArtifact(): Promise<ResearchRunArtifact> {
         limitation: "Metadata grows with writers.",
         relevanceNote: "Supports concurrent writers.",
       },
+      {
+        paperVersion: "2601.00003v1",
+        evidenceDepth: "abstract",
+        isolationStatus: "isolated",
+        approach: "Epoch fencing",
+        borrow: "Fence stale writers with monotonic epochs.",
+        limitation: "Epoch allocation adds coordination overhead.",
+        relevanceNote: "Protects invalidation from delayed writers.",
+      },
     ],
+    excludedPapers: [],
     angles: [
-      { label: "bounded leases", paperVersions: ["2601.00001v2"] },
+      { label: "bounded leases", paperVersions: ["2601.00001v2", "2601.00003v1"] },
       { label: "causal versions", paperVersions: ["2601.00002v1"] },
     ],
     recommendedPath: {
@@ -184,7 +222,9 @@ async function completeArtifact(): Promise<ResearchRunArtifact> {
       sketch: "Use bounded leases with explicit invalidation.",
       firstStep: "Measure acceptable staleness.",
       loadBearingRisk: "Clock skew can extend stale reads.",
-      citations: [{ paperVersion: "2601.00001v2", role: "primary mechanism" }],
+      citations: [
+        { source: "paper", paperVersion: "2601.00001v2", role: "primary mechanism" },
+      ],
     },
     alternates: [{ angle: "causal versions", tradeOff: "Stronger causality, higher metadata cost." }],
     pitfalls: [{ paperVersion: "2601.00002v1", risk: "Do not ignore writer-set growth." }],
@@ -220,4 +260,117 @@ test("Research Run validation forbids a recommendation on an incomplete run", as
   const validation = validateResearchRun(artifact);
   assert.equal(validation.valid, false);
   assert.ok(validation.errors.some((error) => error.includes("cannot contain a Recommended Path")));
+});
+
+test("Research Run validation rejects Thin Coverage presented as Complete", async () => {
+  const artifact = await completeArtifact();
+  artifact.researchEvidence.papers = artifact.researchEvidence.papers.slice(0, 2);
+  artifact.researchEvidence.coverage = {
+    status: "thin",
+    reason: "Only two Papers were retrieved.",
+  };
+  artifact.excludedPapers = [];
+
+  const validation = validateResearchRun(artifact);
+
+  assert.equal(validation.valid, false);
+  assert.ok(validation.errors.some((error) => error.includes("Complete Research Run requires ready")));
+});
+
+test("Research Run validation requires every retained Paper to be accounted for", async () => {
+  const artifact = await completeArtifact();
+  artifact.findings = artifact.findings.slice(0, 2);
+  artifact.angles[0].paperVersions = ["2601.00001v2"];
+
+  const validation = validateResearchRun(artifact);
+
+  assert.equal(validation.valid, false);
+  assert.ok(
+    validation.errors.some((error) => error.includes("2601.00003v1 has no finding or exclusion")),
+  );
+});
+
+test("Research Run validation accepts Thin Coverage after reasoned exclusions", async () => {
+  const artifact = await completeArtifact();
+  artifact.status = "thin";
+  artifact.findings = artifact.findings.slice(0, 2);
+  artifact.excludedPapers = [
+    {
+      paperVersion: "2601.00003v1",
+      reason: "The retrieved mechanism does not apply to the selected consistency boundary.",
+    },
+  ];
+  artifact.angles[0].paperVersions = ["2601.00001v2"];
+
+  const validation = validateResearchRun(artifact);
+
+  assert.deepEqual(validation, { valid: true, errors: [] });
+});
+
+test("Research Run validation reports a missing exclusions collection", async () => {
+  const artifact = await completeArtifact();
+  delete (artifact as Partial<ResearchRunArtifact>).excludedPapers;
+
+  const validation = validateResearchRun(artifact);
+
+  assert.equal(validation.valid, false);
+  assert.ok(validation.errors.includes("excludedPapers must be an array"));
+});
+
+test("Research Run validation accepts traceable Documentation Evidence", async () => {
+  const artifact = await completeArtifact();
+  artifact.documentationEvidence = {
+    status: "used",
+    reason: "The path depends on the current cache API.",
+    sourceIdentity: "Example Cache 4.2 documentation",
+  };
+  artifact.recommendedPath!.citations.push({
+    source: "documentation",
+    sourceIdentity: "Example Cache 4.2 documentation",
+    role: "current dependency interface",
+  });
+
+  const validation = validateResearchRun(artifact);
+
+  assert.deepEqual(validation, { valid: true, errors: [] });
+});
+
+test("Research Run validation rejects untracked Documentation Evidence", async () => {
+  const artifact = await completeArtifact();
+  artifact.recommendedPath!.citations.push({
+    source: "documentation",
+    sourceIdentity: "Unrecorded documentation",
+    role: "current dependency interface",
+  });
+
+  const validation = validateResearchRun(artifact);
+
+  assert.equal(validation.valid, false);
+  assert.ok(validation.errors.some((error) => error.includes("not recorded as used")));
+});
+
+test("Research Run JSON validation rejects invalid contract enums", async () => {
+  const artifact = (await completeArtifact()) as unknown as Record<string, unknown>;
+  artifact.status = "bogus";
+  const findings = artifact.findings as Array<Record<string, unknown>>;
+  findings[0].evidenceDepth = "invented-depth";
+  findings[0].isolationStatus = "contaminated";
+  const documentation = artifact.documentationEvidence as Record<string, unknown>;
+  documentation.status = "invented-status";
+
+  const validation = validateResearchRun(artifact);
+
+  assert.equal(validation.valid, false);
+  assert.ok(validation.errors.some((error) => error.startsWith("status must be one of")));
+  assert.ok(validation.errors.some((error) => error.includes("evidenceDepth must be one of")));
+  assert.ok(validation.errors.some((error) => error.includes("isolationStatus must be one of")));
+  assert.ok(validation.errors.some((error) => error.includes("documentationEvidence.status")));
+});
+
+test("Research Run JSON validation reports malformed structure instead of throwing", () => {
+  const validation = validateResearchRun({ status: "complete" });
+
+  assert.equal(validation.valid, false);
+  assert.ok(validation.errors.includes("researchEvidence must be an object"));
+  assert.ok(validation.errors.includes("findings must be an array"));
 });

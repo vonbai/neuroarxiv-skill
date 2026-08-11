@@ -2,7 +2,7 @@
 
 > **Historical evaluation — v0.1 workflow.** This document is retained for
 > provenance. It measured the former abstract-only workflow, including a
-> Claude-specific companion engine that no longer exists in v0.2. Its results
+> Claude-specific companion engine that no longer exists in v0.3. Its results
 > motivate the isolate-then-converge discipline but do not validate the current
 > deterministic module, selective full-text step, budgets, or failure states.
 

@@ -1,7 +1,7 @@
 # Deep-tech eval — raw transcripts
 
 > **Historical raw data — v0.1 workflow.** Preserve this file unchanged as
-> evaluation provenance. It is not a transcript of the current v0.2 Skill-first
+> evaluation provenance. It is not a transcript of the current v0.3 Skill-first
 > implementation.
 
 Full, unedited output from all three conditions, run 2026-08-08 in the same

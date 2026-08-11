@@ -63,14 +63,16 @@ Resolve paths relative to this Skill directory and run the bundled helper:
 
 ```bash
 node scripts/search.mjs "<build problem>" \
-  --categories "<cat1>,<cat2>" \
+  --categories "<cat1>=<reason1>,<cat2>=<reason2>" \
   --terms "<term1>,<term2>" \
   --expand-terms "<broader-term1>,<broader-term2>" \
   --json
 ```
 
 Omit `--expand-terms` when no honest expansion exists. Add `--since-years 0`
-only when older work is relevant; otherwise use the eight-year default.
+only when older work is relevant; otherwise use the eight-year default. When the
+caller explicitly overrides the full-text budget, pass
+`--max-full-text-papers <count>` so the emitted Research Evidence records it.
 
 The helper owns sequential requests, courtesy delay, submitted-date constraints,
 bounded retry, exact Paper versions, metadata normalization, category merging,
@@ -98,7 +100,7 @@ sees or compares sibling Papers is invalid.
 
 ```json
 {
-  "paperId": "exact retrieved version",
+  "paperVersion": "exact retrieved version",
   "evidenceDepth": "abstract",
   "approach": "core technical mechanism",
   "borrow": "one concrete implementable takeaway",
@@ -106,6 +108,10 @@ sees or compares sibling Papers is invalid.
   "relevanceNote": "fit to the Build Problem"
 }
 ```
+
+For each retained Paper that is irrelevant after isolated reading, record one
+`excludedPapers` entry with its exact version and a concrete reason. A retained
+Paper must end in exactly one place: a Prior-Art Finding or `excludedPapers`.
 
 Paraphrase. Support only claims present in the material actually read. Re-run one
 contaminated reading once in a clean context; persistent contamination makes the
@@ -144,6 +150,11 @@ Choose exactly one Recommended Path. Synthesize:
 - one-line trade-offs for Alternate Paths;
 - consequential Open Threads.
 
+Give every Evidence Citation an explicit source. A Research Evidence citation
+uses `source: "paper"` plus the exact `paperVersion`. A Documentation Evidence
+citation uses `source: "documentation"` plus the exact `sourceIdentity` declared
+in Documentation Evidence coverage. Keep Prior-Art Pitfalls Paper-backed.
+
 If the path depends on the current interface or constraints of a concrete
 dependency, consult version-specific Documentation Evidence using the caller's
 normal documentation capability. Documentation describes current intended use;
@@ -154,6 +165,19 @@ judgment connecting them.
 claim resolves to the Evidence Chain that supports it.
 
 ## 8. Validate and Report
+
+Assemble the structured artifact defined in
+[references/research-run-artifact.md](references/research-run-artifact.md), write
+it to an operating-system temporary JSON file, and run:
+
+```bash
+node scripts/validate.mjs <temporary-research-run.json>
+```
+
+Remove the temporary file after validation. For Complete or Thin Coverage, fix
+every reported structural error within the existing budget before reporting. For
+an Incomplete Research Run, preserve the validator errors as the explicit failure
+reason; never erase broken isolation or an Evidence Chain to make validation pass.
 
 Reject unknown Paper ids, synthesized titles or URLs, sibling-aware readings,
 claims deeper than their Evidence Depth, and citations whose role is unsupported.

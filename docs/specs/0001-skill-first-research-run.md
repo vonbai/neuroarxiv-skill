@@ -46,6 +46,8 @@ Research Evidence from arXiv is the product's core evidence. Documentation Evide
 28. As a maintainer, I want the Skill and supporting CLI to share one deterministic retrieval implementation, so that request, parsing, budget, and identity rules cannot drift.
 29. As a maintainer, I want semantic judgment to remain outside the deterministic module, so that no hidden LLM, model selection, or provider credential becomes a second owner.
 30. As a maintainer, I want the installed Skill bundle to include every required reference, so that installation cannot silently omit part of the workflow.
+31. As a reviewer, I want every retained Paper to have one finding or explicit exclusion, so that unread evidence cannot disappear from the Research Run.
+32. As a user of multiple coding Agents, I want one canonical Skill copy with Agent-specific links and one removal command, so that installs cannot drift or leave unowned files behind.
 
 ## Implementation Decisions
 
@@ -64,13 +66,16 @@ Research Evidence from arXiv is the product's core evidence. Documentation Evide
 - Abstract reading is the default Evidence Depth. At most three load-bearing Papers are selected for full-text reading under the default budget.
 - Research Evidence owns claims about mechanisms, reported evaluation, applicable conditions, and stated limitations. Documentation Evidence owns claims about the current intended interface and constraints of a concrete dependency. The caller Agent owns the judgment connecting both to the Build Problem.
 - A missing dependency interface does not invalidate a Paper mechanism; it may imply custom implementation. An unresolved load-bearing conflict becomes an Open Thread or makes the Research Run incomplete.
-- Every citation in a Recommended Path, Alternate Path, or Prior-Art Pitfall must resolve to a Paper in the Research Run. Unknown identifiers are validation failures and never receive synthesized URLs or titles.
+- Research Evidence citations resolve to exact Paper versions in the Research Run. Documentation Evidence citations resolve to the declared version/source identity. Unknown identifiers are validation failures and never receive synthesized URLs or titles.
+- Every retained Paper appears exactly once as a Prior-Art Finding or a reasoned Paper Exclusion.
 - Evidence Saturation ends retrieval when additional relevant Papers repeat existing mechanisms, limitations, and trade-offs without changing the decision.
-- Thin Coverage is a valid outcome when sparse Research Evidence still supports a bounded recommendation. Incomplete Research Run is the required outcome when isolation, validation, or a load-bearing Evidence Chain remains broken after bounded recovery.
+- Thin Coverage is a valid outcome when one or two usable findings still support a bounded recommendation, including when a larger retrieved set contains reasoned exclusions. Incomplete Research Run is the required outcome when isolation, validation, or a load-bearing Evidence Chain remains broken after bounded recovery.
 - The Skill declares static evidence obligations and final Evidence Coverage. It does not create a Capability Manifest or probe Skills, CLIs, MCP servers, connectors, credentials, or machine capacity.
 - Documentation lookup is conditional on a concrete dependency question. Context7 or similar caller-owned capabilities may satisfy that role, but no particular tool is required or hardcoded.
 - GitHub repository discovery, maturity scoring, admission, and execution are outside the product scope.
 - The package repository identity becomes NeuroArxiv Skill at its renamed fork location while retaining clear upstream attribution and MIT licensing.
+- The standard Skills CLI owns install, update, Agent symlinks, lock state, and removal. The repository ships one self-contained Skill bundle and no second installer.
+- The committed Skill runtime is a generated projection of the TypeScript source. CI rejects a stale projection so it cannot become a second implementation owner.
 - Historical evaluations remain historical evidence. Current product documentation must distinguish claims measured against the former implementation from guarantees of the revised implementation.
 
 ## Testing Decisions
@@ -87,6 +92,7 @@ Research Evidence from arXiv is the product's core evidence. Documentation Evide
 - Given an explicit invocation, conformance evaluation must observe that the run starts. Given an implicit trivial or already-converged task, it must observe that the Skill stays out of the way.
 - The package contract test must verify that no Claude SDK, internal LLM runtime, provider credential, or model flag remains in production dependencies or public usage.
 - The installation test must verify that the complete Skill bundle, including referenced material, reaches the selected destination.
+- On a compatible Node version, the installation test must exercise the standard global install, update, canonical Skill, Claude Code symlink, helper execution, lock cleanup, and removal while preserving an unrelated Skill.
 - Keep parser-level tests only for regressions that cannot be made observable through the Research Run seam, such as XML entity decoding.
 - A live arXiv smoke check may verify integration separately, but repeatable acceptance relies on recorded fixtures rather than network availability or changing search results.
 

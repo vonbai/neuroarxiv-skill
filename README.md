@@ -28,29 +28,46 @@ single product journey.
 
 ## Install
 
-Install the complete Skill bundle for Claude Code:
+Install one user-level copy for Codex and link that copy into Claude Code:
 
 ```bash
-npx github:vonbai/neuroarxiv-skill install
+npx skills@1.5.22 add vonbai/neuroarxiv-skill \
+  --skill neuroarxiv \
+  --global \
+  --agent codex \
+  --agent claude-code \
+  --yes
 ```
 
-Or choose another explicit Skill directory:
+The standard installer creates this layout:
+
+```text
+~/.agents/skills/neuroarxiv             canonical Skill
+~/.claude/skills/neuroarxiv             symlink to the canonical Skill
+```
+
+Codex reads `~/.agents/skills` directly. The bundle contains `SKILL.md`, both
+references, Agent metadata, search and validation wrappers, and the generated
+dependency-free runtime. The installer requires Node 22.20 or newer; the
+installed NeuroArxiv runtime supports Node 18 or newer.
+
+Update or remove the Skill through the same owner:
 
 ```bash
-npx github:vonbai/neuroarxiv-skill install \
-  --destination ~/.codex/skills/neuroarxiv
+npx skills@1.5.22 update --global neuroarxiv --yes
+npx skills@1.5.22 remove --global neuroarxiv --yes
 ```
 
-The installer copies `SKILL.md`, its category reference, Agent metadata, the
-search wrapper, and the minimal deterministic runtime. Start a new Agent
-session after installation.
+Do not pass an Agent filter when removing the complete Skill: the manager must
+remove every Agent link before deleting the canonical copy and lock entry.
 
 ## Use
 
-Invoke the Skill with one open Build Problem:
+Invoke the Skill with one open Build Problem. Use `$neuroarxiv` in Codex or
+`/neuroarxiv` in Claude Code:
 
 ```text
-/neuroarxiv How should we invalidate shared LLM response caches without
+$neuroarxiv How should we invalidate shared LLM response caches without
 serving stale policy-sensitive results?
 ```
 
@@ -78,7 +95,7 @@ semantic inference:
 ```bash
 npx github:vonbai/neuroarxiv-skill search \
   "cache invalidation across concurrent writers" \
-  --categories cs.DB,cs.DC \
+  --categories "cs.DB=durable deduplication,cs.DC=distributed coordination" \
   --terms "cache invalidation,cache coherence" \
   --expand-terms "distributed cache consistency" \
   --json
@@ -113,7 +130,8 @@ The public package interface is intentionally narrow:
 
 - `collectResearchEvidence` collects deterministic arXiv evidence.
 - `validateResearchRun` checks budgets, isolation declarations, Paper identity,
-  and Evidence Chains without making semantic judgments.
+  Paper accounting, outcome status, and typed Evidence Chains without making
+  semantic judgments.
 
 The domain glossary and architecture decisions live in
 [`CONTEXT.md`](./CONTEXT.md) and [`docs/adr`](./docs/adr). The accepted upgrade
@@ -128,14 +146,17 @@ npm pack --dry-run
 ```
 
 `npm run check` covers types, fixture-driven Research Run behavior, clean build,
-Skill structure, and an isolated installation smoke test.
+the generated runtime projection, Skill structure, and an isolated standard
+global install/update/symlink/helper/uninstall lifecycle. Nodes older than 22.20
+still verify the self-contained Skill bundle but skip the external installer
+lifecycle.
 
 ## Evaluation provenance
 
 [`EVALS.md`](./EVALS.md) and
 [`bench/deep-tech-eval-transcripts.md`](./bench/deep-tech-eval-transcripts.md)
 are retained as historical upstream evaluation evidence. They measured the
-former v0.1 workflow and are not presented as a validation of this revised v0.2
+former v0.1 workflow and are not presented as a validation of this revised v0.3
 implementation.
 
 ## License

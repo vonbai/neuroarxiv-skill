@@ -36,6 +36,10 @@ _Avoid_: Summary, branch
 The approach, concrete borrow, limitation, and relevance extracted by an Isolated Reading.
 _Avoid_: Paper read, note
 
+**Paper Exclusion**:
+The exact version and reason for a retained Paper found irrelevant after Isolated Reading.
+_Avoid_: Missing finding, silent drop
+
 **Research Evidence**:
 Evidence grounded in a Paper that supports claims about a mechanism, its evaluation, and its reported limitations.
 _Avoid_: Documentation Evidence, implementation example

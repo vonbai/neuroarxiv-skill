@@ -78,9 +78,23 @@ export type ArchitecturalAngle = {
   paperVersions: string[];
 };
 
-export type EvidenceCitation = {
+export type ResearchEvidenceCitation = {
+  source: "paper";
   paperVersion: string;
   role: string;
+};
+
+export type DocumentationEvidenceCitation = {
+  source: "documentation";
+  sourceIdentity: string;
+  role: string;
+};
+
+export type EvidenceCitation = ResearchEvidenceCitation | DocumentationEvidenceCitation;
+
+export type ExcludedPaper = {
+  paperVersion: string;
+  reason: string;
 };
 
 export type RecommendedPath = {
@@ -112,6 +126,7 @@ export type ResearchRunArtifact = {
   problem: string;
   researchEvidence: ResearchEvidenceResult;
   findings: PriorArtFinding[];
+  excludedPapers: ExcludedPaper[];
   angles: ArchitecturalAngle[];
   recommendedPath: RecommendedPath | null;
   alternates: AlternatePath[];
