@@ -26,8 +26,6 @@ export type SearchPlan = {
 export type ResearchBudget = {
   maxPapers?: number;
   maxFullTextPapers?: number;
-  papersPerCategory?: number;
-  maxExpansions?: 0 | 1;
 };
 
 export type ResearchEvidenceRequest = {
@@ -36,18 +34,63 @@ export type ResearchEvidenceRequest = {
   budget?: ResearchBudget;
 };
 
-export type SearchAttempt = {
+export type RetrievalFailureKind =
+  | "throttled"
+  | "timeout"
+  | "transport"
+  | "server"
+  | "request-rejected"
+  | "invalid-response"
+  | "deadline-exhausted";
+
+export type RetrievalFailure = {
+  kind: RetrievalFailureKind;
+  message: string;
+  retryable: boolean;
+  httpStatus?: number;
+  retryAfterMs?: number;
+};
+
+export type RetrievalRequestTrace =
+  | {
+      sequence: number;
+      status: "succeeded";
+    }
+  | {
+      sequence: number;
+      status: "failed";
+      failure: RetrievalFailure;
+    };
+
+type SearchAttemptBase = {
   phase: "initial" | "expansion";
   category: string;
   terms: string[];
   paperCount: number;
-  failure?: string;
+  requests: RetrievalRequestTrace[];
 };
 
+export type SearchAttempt =
+  | (SearchAttemptBase & {
+      status: "succeeded";
+    })
+  | (SearchAttemptBase & {
+      status: "failed";
+      failure: RetrievalFailure;
+    });
+
 export type ResearchEvidenceCoverage = {
-  status: "ready" | "thin" | "unavailable";
-  reason: string;
+  status: "ready" | "thin" | "empty" | "unavailable";
 };
+
+export type RetrievalTermination =
+  | { reason: "initial-budget-satisfied" }
+  | { reason: "search-plan-exhausted" }
+  | {
+      reason: "retrieval-failed";
+      phase: "initial" | "expansion";
+      category: string;
+    };
 
 export type ResearchEvidenceResult = {
   problem: string;
@@ -57,8 +100,8 @@ export type ResearchEvidenceResult = {
   budget: Required<ResearchBudget>;
   papers: Paper[];
   attempts: SearchAttempt[];
-  expansionUsed: boolean;
   coverage: ResearchEvidenceCoverage;
+  termination: RetrievalTermination;
 };
 
 export type EvidenceDepth = "abstract" | "full-text";
@@ -121,8 +164,19 @@ export type DocumentationEvidenceCoverage = {
   sourceIdentity?: string;
 };
 
+export type IncompleteReason = {
+  kind:
+    | "research-evidence-empty"
+    | "research-evidence-unavailable"
+    | "isolation-broken"
+    | "evidence-chain-broken"
+    | "validation-failed";
+  detail: string;
+};
+
 export type ResearchRunArtifact = {
   status: "complete" | "thin" | "incomplete";
+  incompleteReason: IncompleteReason | null;
   problem: string;
   researchEvidence: ResearchEvidenceResult;
   findings: PriorArtFinding[];

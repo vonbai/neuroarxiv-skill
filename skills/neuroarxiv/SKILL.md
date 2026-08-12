@@ -83,27 +83,37 @@ cell, or handle, continue that same handle until it reports an exit status. An
 empty stdout chunk is not completion. After exit status 0, read
 `$evidence_file`; reuse its complete JSON value verbatim as the final Research
 Run's `researchEvidence` object. The Evidence Artifact is the single source of
-truth, not stdout or the adjacent `.pending` ownership marker.
+truth; the helper has no stdout result path.
 
 A second process using the same path is rejected before retrieval. If the
 original process is externally interrupted, first confirm that it has stopped;
-then remove its stale `.pending` marker and perform bounded recovery with the
-same Search Plan. A handled failure releases the marker itself. Never launch a
-replacement while the original execution handle remains live.
+then remove its stale `.pending` marker and perform one recovery with the same
+Search Plan. A handled process failure releases the marker itself. Never launch
+a replacement while the original execution handle remains live, and never rerun
+an Evidence Artifact whose coverage is `unavailable`.
 
-The helper owns sequential requests, courtesy delay, submitted-date constraints,
-bounded retry, exact Paper versions, metadata normalization, category merging,
-deduplication, and the retained-Paper budget. It uses the public arXiv export
+The helper owns sequential requests, courtesy delay, one wall-clock deadline,
+structured Retrieval Failures, exact Paper versions, metadata normalization,
+category merging, deduplication, and the retained-Paper budget. One exhausted
+Search Attempt stops the source. Expansion runs only when every initial Search
+Attempt succeeded but coverage remains thin. It uses the public arXiv export
 interface without credentials.
 
 If the bundled runtime is unavailable in a source-only checkout, build the
-package once and rerun the same helper. If arXiv remains unavailable after its
-bounded recovery, return an Incomplete Research Run. Do not install or probe
-unrelated capabilities as recovery.
+package once and rerun the same helper. Then branch on the Evidence Artifact:
+
+- `ready` or `thin`: continue to Isolated Readings;
+- `empty`: stop with `incompleteReason.kind: "research-evidence-empty"`;
+- `unavailable`: stop with `incompleteReason.kind: "research-evidence-unavailable"`.
+
+For either stop, set `recommendedPath: null`, keep the helper's Search Attempts
+and Retrieval Termination verbatim, validate the artifact, and report the
+Incomplete Reason. Treat `empty` as a Search Plan result and `unavailable` as a
+source failure; neither authorizes capability probing or an automatic rerun.
 
 **Completion criterion:** the one Retrieval Owner has exited and its complete
-Evidence Artifact is readable, with a version-identifiable Paper set and
-retrieval coverage or an explicit unavailable status.
+Evidence Artifact is readable, with `ready`, `thin`, `empty`, or `unavailable`
+coverage and one traceable Retrieval Termination.
 
 ## 5. Make Isolated Readings
 
@@ -194,8 +204,11 @@ node scripts/validate.mjs <temporary-research-run.json>
 
 Remove both temporary files after validation. For Complete or Thin Coverage, fix
 every reported structural error within the existing budget before reporting. For
-an Incomplete Research Run, preserve the validator errors as the explicit failure
-reason; never erase broken isolation or an Evidence Chain to make validation pass.
+an Incomplete Research Run, set exactly one `incompleteReason` before validation.
+Use `validation-failed` when structural errors remain and preserve those errors in
+its detail; use the evidence, isolation, or Evidence Chain kind when that condition
+stopped the journey. Never erase broken isolation or an Evidence Chain to make
+validation pass.
 
 Reject unknown Paper ids, synthesized titles or URLs, sibling-aware readings,
 claims deeper than their Evidence Depth, and citations whose role is unsupported.
@@ -204,15 +217,18 @@ Use exactly one outcome:
 
 - **Complete:** one Recommended Path has intact load-bearing Evidence Chains.
 - **Thin Coverage:** sparse Research Evidence supports only a bounded path.
-- **Incomplete Research Run:** bounded recovery cannot repair retrieval,
-  isolation, validation, or a load-bearing Evidence Chain.
+- **Incomplete Research Run:** one explicit Incomplete Reason prevents a
+  Recommended Path after deterministic retrieval or bounded recovery.
 
-Report in this order:
+Always report:
 
 1. **Research Run status**
 2. **Build Problem and Decision Context**
-3. **Searched** — categories, terms, expansion, Paper count
-4. **Evidence Coverage** — Research Evidence and conditional Documentation Evidence
+3. **Searched** — categories, terms, executed phases, Paper count
+4. **Evidence Coverage** — coverage, Retrieval Termination, concise failed-request chain, and conditional Documentation Evidence
+
+For Complete or Thin Coverage, continue with:
+
 5. **Papers read** — exact version, Evidence Depth, approach, limitation
 6. **Architectural Angles**
 7. **THE PATH** — recommendation, first step, risk, Evidence Chains
@@ -220,8 +236,18 @@ Report in this order:
 9. **Prior-Art Pitfalls**
 10. **Open Threads**
 
-Documentation Evidence coverage is `used`, `not needed`, or `unavailable`, with a
-reason and version/source identity when used. Do not add another evidence role.
+For an Incomplete Research Run, finish instead with:
+
+5. **Incomplete Reason** — the one recorded kind and its concrete detail
+6. **Re-entry Condition** — the external change or narrower future decision that
+   would justify a new Research Run
+
+Omit empty recommendation, angle, alternate, and pitfall sections from an
+Incomplete report.
+
+Research Evidence coverage is `ready`, `thin`, `empty`, or `unavailable`.
+Documentation Evidence coverage is `used`, `not needed`, or `unavailable`, with
+a reason and version/source identity when used. Do not add another evidence role.
 
 **Completion criterion:** the user can start implementation from one path while
 seeing exactly what the research supports, what it does not, and why the run

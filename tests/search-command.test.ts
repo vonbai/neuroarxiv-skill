@@ -18,16 +18,11 @@ const EVIDENCE: ResearchEvidenceResult = {
   budget: {
     maxPapers: 12,
     maxFullTextPapers: 3,
-    papersPerCategory: 4,
-    maxExpansions: 1,
   },
   papers: [],
   attempts: [],
-  expansionUsed: false,
-  coverage: {
-    status: "unavailable",
-    reason: "fixture result",
-  },
+  coverage: { status: "empty" },
+  termination: { reason: "search-plan-exhausted" },
 };
 
 async function pathExists(path: string): Promise<boolean> {
@@ -48,6 +43,8 @@ test("search CLI preserves category reasons and explicit full-text budget", () =
     "retry suppression,idempotent execution",
     "--max-full-text-papers",
     "5",
+    "--output",
+    "/tmp/neuroarxiv-search-flags.json",
   ]);
 
   assert.deepEqual(flags?.categories, [
@@ -57,16 +54,44 @@ test("search CLI preserves category reasons and explicit full-text budget", () =
   assert.equal(flags?.maxFullTextPapers, 5);
 });
 
-test("search CLI keeps plain category ids backward compatible", () => {
+test("search CLI accepts plain category ids", () => {
   const flags = parseSearch([
     "Choose a retry mechanism",
     "--categories",
     "cs.DC",
     "--terms",
     "retry semantics",
+    "--output",
+    "/tmp/neuroarxiv-plain-category.json",
   ]);
 
   assert.deepEqual(flags?.categories, [{ id: "cs.DC", why: "caller-selected" }]);
+});
+
+test("search CLI has exactly one result path and requires an Evidence Artifact", () => {
+  assert.throws(
+    () =>
+      parseSearch([
+        "Choose a retry mechanism",
+        "--categories",
+        "cs.DC",
+        "--terms",
+        "retry semantics",
+      ]),
+    /--output requires a fresh file path/i,
+  );
+  assert.throws(
+    () =>
+      parseSearch([
+        "Choose a retry mechanism",
+        "--categories",
+        "cs.DC",
+        "--terms",
+        "retry semantics",
+        "--json",
+      ]),
+    /unknown search flag: --json/i,
+  );
 });
 
 test("search CLI gives one running process ownership and atomically publishes one Evidence Artifact", async () => {
@@ -80,7 +105,6 @@ test("search CLI gives one running process ownership and atomically publishes on
   });
   let collections = 0;
   const stderr: string[] = [];
-  const stdout: string[] = [];
   const command = createSearchCommand({
     collect: async () => {
       collections += 1;
@@ -90,7 +114,6 @@ test("search CLI gives one running process ownership and atomically publishes on
       });
     },
     stderr: (message) => stderr.push(message),
-    stdout: (message) => stdout.push(message),
   });
   const argv = [
     EVIDENCE.problem,
@@ -119,7 +142,6 @@ test("search CLI gives one running process ownership and atomically publishes on
 
     assert.deepEqual(JSON.parse(await readFile(output, "utf8")), EVIDENCE);
     assert.equal(await pathExists(pending), false);
-    assert.deepEqual(stdout, [], "the file, not captured stdout, is the Evidence source of truth");
     await assert.rejects(command(argv), /already exists/i);
     assert.equal(collections, 1, "a completed Evidence Artifact must not be overwritten or recollected");
   } finally {
@@ -147,7 +169,6 @@ test("search CLI releases ownership after a handled failure so bounded recovery 
         throw new Error("fixture interruption");
       },
       stderr: silent,
-      stdout: silent,
     });
     await assert.rejects(failing(argv), /fixture interruption/);
     assert.equal(await pathExists(output), false);
@@ -156,7 +177,6 @@ test("search CLI releases ownership after a handled failure so bounded recovery 
     const recovered = createSearchCommand({
       collect: async () => EVIDENCE,
       stderr: silent,
-      stdout: silent,
     });
     await recovered(argv);
     assert.deepEqual(JSON.parse(await readFile(output, "utf8")), EVIDENCE);

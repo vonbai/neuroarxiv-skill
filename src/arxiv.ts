@@ -1,11 +1,16 @@
-import type { Paper } from "./types.js";
+import type {
+  Paper,
+  RetrievalFailure,
+  RetrievalRequestTrace,
+} from "./types.js";
 
 const ARXIV_API = "https://export.arxiv.org/api/query";
 const DEFAULT_REQUEST_DELAY_MS = 3000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
+const DEFAULT_RETRIEVAL_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_RETRIES = 1;
 const USER_AGENT =
-  "neuroarxiv-skill/0.3.1 (+https://github.com/vonbai/neuroarxiv-skill)";
+  "neuroarxiv-skill/0.4.0 (+https://github.com/vonbai/neuroarxiv-skill)";
 
 type FetchLike = typeof fetch;
 
@@ -17,8 +22,20 @@ export type ArxivSearch = {
 };
 
 export type ArxivGateway = {
-  search(input: ArxivSearch): Promise<Paper[]>;
+  search(input: ArxivSearch): Promise<ArxivSearchOutcome>;
 };
+
+export type ArxivSearchOutcome =
+  | {
+      status: "succeeded";
+      papers: Paper[];
+      requests: RetrievalRequestTrace[];
+    }
+  | {
+      status: "failed";
+      failure: RetrievalFailure;
+      requests: RetrievalRequestTrace[];
+    };
 
 export type ArxivGatewayOptions = {
   fetch?: FetchLike;
@@ -26,8 +43,16 @@ export type ArxivGatewayOptions = {
   now?: () => number;
   requestDelayMs?: number;
   requestTimeoutMs?: number;
+  retrievalTimeoutMs?: number;
   maxRetries?: number;
 };
+
+class RetrievalDeadlineError extends Error {
+  constructor() {
+    super("Research Evidence retrieval deadline exhausted");
+    this.name = "RetrievalDeadlineError";
+  }
+}
 
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -165,16 +190,27 @@ export function createArxivGateway(options: ArxivGatewayOptions = {}): ArxivGate
   const now = options.now ?? Date.now;
   const requestDelayMs = options.requestDelayMs ?? DEFAULT_REQUEST_DELAY_MS;
   const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const retrievalTimeoutMs = options.retrievalTimeoutMs ?? DEFAULT_RETRIEVAL_TIMEOUT_MS;
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
-  const cache = new Map<string, Promise<Paper[]>>();
+  const deadlineAt = now() + retrievalTimeoutMs;
+  const cache = new Map<string, Promise<ArxivSearchOutcome>>();
 
   let requestQueue = Promise.resolve();
   let nextRequestAt = 0;
 
+  function remainingMs(): number {
+    return Math.max(0, deadlineAt - now());
+  }
+
+  async function sleepWithinDeadline(ms: number): Promise<void> {
+    if (ms >= remainingMs()) throw new RetrievalDeadlineError();
+    if (ms > 0) await sleep(ms);
+  }
+
   async function schedule<T>(task: () => Promise<T>): Promise<T> {
     const run = requestQueue.then(async () => {
       const waitMs = Math.max(0, nextRequestAt - now());
-      if (waitMs > 0) await sleep(waitMs);
+      await sleepWithinDeadline(waitMs);
       nextRequestAt = now() + requestDelayMs;
       return task();
     });
@@ -185,39 +221,145 @@ export function createArxivGateway(options: ArxivGatewayOptions = {}): ArxivGate
     return run;
   }
 
-  async function fetchText(url: string): Promise<string> {
+  function deadlineFailure(): RetrievalFailure {
+    return {
+      kind: "deadline-exhausted",
+      message: "Research Evidence retrieval deadline exhausted",
+      retryable: false,
+    };
+  }
+
+  function transportFailure(error: unknown): RetrievalFailure {
+    if (
+      (error instanceof DOMException && error.name === "AbortError") ||
+      (error instanceof Error && error.name === "AbortError")
+    ) {
+      return {
+        kind: "timeout",
+        message: "arXiv request timed out",
+        retryable: true,
+      };
+    }
+    return {
+      kind: "transport",
+      message: error instanceof Error ? error.message : String(error),
+      retryable: true,
+    };
+  }
+
+  function responseFailure(response: Response): RetrievalFailure {
+    const retryAfterMs = response.headers.has("retry-after")
+      ? retryDelayMs(response, now())
+      : undefined;
+    if (response.status === 429) {
+      return {
+        kind: "throttled",
+        message: "arXiv API returned 429",
+        retryable: true,
+        httpStatus: 429,
+        ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+      };
+    }
+    if (response.status >= 500) {
+      return {
+        kind: "server",
+        message: `arXiv API returned ${response.status}`,
+        retryable: true,
+        httpStatus: response.status,
+        ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+      };
+    }
+    return {
+      kind: "request-rejected",
+      message: `arXiv API returned ${response.status}`,
+      retryable: false,
+      httpStatus: response.status,
+    };
+  }
+
+  async function fetchText(
+    url: string,
+  ): Promise<
+    | { status: "succeeded"; text: string; requests: RetrievalRequestTrace[] }
+    | { status: "failed"; failure: RetrievalFailure; requests: RetrievalRequestTrace[] }
+  > {
+    const requests: RetrievalRequestTrace[] = [];
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
       let response: Response;
+      let responseText: string | undefined;
       try {
-        response = await schedule(async () => {
+        const received = await schedule(async () => {
+          const remaining = remainingMs();
+          if (remaining <= 0) throw new RetrievalDeadlineError();
           const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+          const timer = setTimeout(() => controller.abort(), Math.min(requestTimeoutMs, remaining));
           try {
-            return await fetchImpl(url, {
+            const fetched = await fetchImpl(url, {
               headers: { "User-Agent": USER_AGENT },
               signal: controller.signal,
             });
+            return {
+              response: fetched,
+              text: fetched.ok ? await fetched.text() : undefined,
+            };
           } finally {
             clearTimeout(timer);
           }
         });
+        response = received.response;
+        responseText = received.text;
       } catch (error) {
-        if (attempt === maxRetries) throw error;
-        await sleep(5000);
+        if (error instanceof RetrievalDeadlineError) {
+          return { status: "failed", failure: deadlineFailure(), requests };
+        }
+        const failure = transportFailure(error);
+        requests.push({ sequence: attempt + 1, status: "failed", failure });
+        if (!failure.retryable || attempt === maxRetries) {
+          return { status: "failed", failure, requests };
+        }
+        try {
+          await sleepWithinDeadline(5000);
+        } catch (deadlineError) {
+          if (deadlineError instanceof RetrievalDeadlineError) {
+            return { status: "failed", failure: deadlineFailure(), requests };
+          }
+          throw deadlineError;
+        }
         continue;
       }
 
-      if (response.ok) return response.text();
-      const retryable = response.status === 429 || response.status >= 500;
-      if (!retryable || attempt === maxRetries) {
-        throw new Error(`arXiv API returned ${response.status}`);
+      if (response.ok) {
+        if (responseText === undefined || !/<feed(?:\s|>)/i.test(responseText)) {
+          const failure: RetrievalFailure = {
+            kind: "invalid-response",
+            message: "arXiv API returned a non-Atom response",
+            retryable: false,
+          };
+          requests.push({ sequence: attempt + 1, status: "failed", failure });
+          return { status: "failed", failure, requests };
+        }
+        requests.push({ sequence: attempt + 1, status: "succeeded" });
+        return { status: "succeeded", text: responseText, requests };
       }
-      await sleep(retryDelayMs(response, now()));
+      const failure = responseFailure(response);
+      requests.push({ sequence: attempt + 1, status: "failed", failure });
+      if (!failure.retryable || attempt === maxRetries) {
+        return { status: "failed", failure, requests };
+      }
+      const delayMs = failure.retryAfterMs ?? 5000;
+      try {
+        await sleepWithinDeadline(delayMs);
+      } catch (deadlineError) {
+        if (deadlineError instanceof RetrievalDeadlineError) {
+          return { status: "failed", failure: deadlineFailure(), requests };
+        }
+        throw deadlineError;
+      }
     }
-    throw new Error("arXiv retry budget exhausted");
+    return { status: "failed", failure: deadlineFailure(), requests };
   }
 
-  async function search(input: ArxivSearch): Promise<Paper[]> {
+  async function search(input: ArxivSearch): Promise<ArxivSearchOutcome> {
     const query = buildSearchQuery(
       input.category,
       input.terms,
@@ -235,12 +377,14 @@ export function createArxivGateway(options: ArxivGatewayOptions = {}): ArxivGate
     const cached = cache.get(url);
     if (cached) return cached;
 
-    const pending = fetchText(url)
-      .then((xml) => parseEntries(xml, input.category))
-      .catch((error) => {
-        cache.delete(url);
-        throw error;
-      });
+    const pending = fetchText(url).then((result): ArxivSearchOutcome => {
+      if (result.status === "failed") return result;
+      return {
+        status: "succeeded",
+        papers: parseEntries(result.text, input.category),
+        requests: result.requests,
+      };
+    });
     cache.set(url, pending);
     return pending;
   }

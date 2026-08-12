@@ -8,6 +8,7 @@ captured stdout.
 ```json
 {
   "status": "complete | thin | incomplete",
+  "incompleteReason": null,
   "problem": "same Build Problem as researchEvidence.problem",
   "researchEvidence": {},
   "findings": [
@@ -72,9 +73,19 @@ captured stdout.
 }
 ```
 
-Use `recommendedPath: null` for `incomplete`. Complete requires ready retrieval
-coverage and at least three usable findings. Thin Coverage requires available
-retrieval coverage and one or two usable findings; this remains true when a
-larger retrieved set contains reasoned exclusions. Every retained Paper must
-appear exactly once in `findings` or `excludedPapers`. Documentation citations
-must match the declared `sourceIdentity` exactly.
+Use `incompleteReason: null` for Complete or Thin Coverage. For `incomplete`, use
+`recommendedPath: null` and exactly one object:
+
+```json
+{
+  "kind": "research-evidence-empty | research-evidence-unavailable | isolation-broken | evidence-chain-broken | validation-failed",
+  "detail": "the concrete condition that stopped this Research Run"
+}
+```
+
+Complete requires ready retrieval coverage and at least three usable findings.
+Thin Coverage requires available retrieval coverage and one or two usable
+findings; this remains true when a larger retrieved set contains reasoned
+exclusions. Every retained Paper must appear exactly once in `findings` or
+`excludedPapers`. Documentation citations must match the declared
+`sourceIdentity` exactly.

@@ -6,7 +6,7 @@ function printHelp(): void {
   console.log(`neuroarxiv — academic prior art for one open build decision
 
 USAGE
-  neuroarxiv search "<problem>" --categories A,B --terms "term one,term two"
+  neuroarxiv search "<problem>" --categories A,B --terms "term one,term two" --output FILE
 
 COMMANDS
   search     collect bounded, normalized arXiv Research Evidence

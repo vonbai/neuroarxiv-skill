@@ -16,16 +16,13 @@ type SearchFlags = {
   expansionTerms: string[];
   maxPapers?: number;
   maxFullTextPapers?: number;
-  papersPerCategory?: number;
   sinceYears?: number;
-  json: boolean;
-  output?: string;
+  output: string;
 };
 
 type SearchCommandDependencies = {
   collect: (request: ResearchEvidenceRequest) => Promise<ResearchEvidenceResult>;
   stderr: (message: string) => void;
-  stdout: (message: string) => void;
 };
 
 type EvidenceArtifact = {
@@ -150,7 +147,7 @@ export function printSearchHelp(): void {
   console.log(`neuroarxiv search — collect bounded arXiv Research Evidence
 
 USAGE
-  neuroarxiv search "<problem>" --categories A,B --terms "term one,term two"
+  neuroarxiv search "<problem>" --categories A,B --terms "term one,term two" --output FILE
 
 FLAGS
   --categories A=reason,B=reason
@@ -159,10 +156,8 @@ FLAGS
   --expand-terms A,B         one caller-selected bounded expansion
   --max-papers N             retained Paper budget (default 12)
   --max-full-text-papers N   full-text reading budget (default 3)
-  --papers-per-category N    requested per category (default 4)
   --since-years N            submitted-date window (default 8, 0 = no filter)
-  --json                     emit Research Evidence as JSON on stdout
-  --output FILE              atomically publish JSON instead to one fresh Evidence Artifact
+  --output FILE              required fresh path for the one Evidence Artifact
   -h, --help
 `);
 }
@@ -173,7 +168,7 @@ export function parseSearch(argv: string[]): SearchFlags | null {
     categories: [],
     terms: [],
     expansionTerms: [],
-    json: false,
+    output: "",
   };
   const problem: string[] = [];
   for (let i = 0; i < argv.length; i += 1) {
@@ -194,14 +189,8 @@ export function parseSearch(argv: string[]): SearchFlags | null {
       case "--max-full-text-papers":
         flags.maxFullTextPapers = integerFlag(argv[++i], "--max-full-text-papers");
         break;
-      case "--papers-per-category":
-        flags.papersPerCategory = integerFlag(argv[++i], "--papers-per-category");
-        break;
       case "--since-years":
         flags.sinceYears = integerFlag(argv[++i], "--since-years");
-        break;
-      case "--json":
-        flags.json = true;
         break;
       case "--output":
         flags.output = pathFlag(argv[++i], "--output");
@@ -219,6 +208,7 @@ export function parseSearch(argv: string[]): SearchFlags | null {
   if (!flags.problem || flags.categories.length === 0 || flags.terms.length === 0) {
     fail("search requires a problem, --categories, and --terms from a caller-authored Search Plan");
   }
+  if (!flags.output) fail("--output requires a fresh file path");
   return flags;
 }
 
@@ -228,7 +218,6 @@ export function createSearchCommand(
   const dependencies: SearchCommandDependencies = {
     collect: collectResearchEvidence,
     stderr: (message) => process.stderr.write(message),
-    stdout: (message) => process.stdout.write(message),
     ...overrides,
   };
 
@@ -246,37 +235,18 @@ export function createSearchCommand(
       budget: {
         maxPapers: flags.maxPapers,
         maxFullTextPapers: flags.maxFullTextPapers,
-        papersPerCategory: flags.papersPerCategory,
       },
     };
-    const artifact = flags.output ? await reserveEvidenceArtifact(flags.output) : undefined;
+    const artifact = await reserveEvidenceArtifact(flags.output);
     try {
       dependencies.stderr(
-        artifact
-          ? `[neuroarxiv] Collecting Research Evidence into ${artifact.path}; wait for this process to exit before reading or retrying.\n`
-          : "[neuroarxiv] Collecting Research Evidence; wait for this process to exit. Empty stdout means the process is still running.\n",
+        `[neuroarxiv] Collecting Research Evidence into ${artifact.path}; wait for this process to exit before reading or retrying.\n`,
       );
       const result = await dependencies.collect(request);
-      if (artifact) {
-        await artifact.publish(result);
-        dependencies.stderr(`[neuroarxiv] Research Evidence ready: ${artifact.path}\n`);
-        return;
-      }
-      if (flags.json) {
-        dependencies.stdout(`${JSON.stringify(result, null, 2)}\n`);
-        return;
-      }
-      dependencies.stdout(
-        [
-          `Research Evidence: ${result.coverage.status}`,
-          result.coverage.reason,
-          ...result.papers.map(
-            (paper) => `- [${paper.version}] ${paper.title} — ${paper.absUrl}`,
-          ),
-        ].join("\n") + "\n",
-      );
+      await artifact.publish(result);
+      dependencies.stderr(`[neuroarxiv] Research Evidence ready: ${artifact.path}\n`);
     } finally {
-      await artifact?.release();
+      await artifact.release();
     }
   };
 }

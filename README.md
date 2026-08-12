@@ -54,8 +54,8 @@ installed NeuroArxiv runtime supports Node 18 or newer.
 Update or remove the Skill through the same owner:
 
 ```bash
-npx skills@1.5.22 update --global neuroarxiv --yes
-npx skills@1.5.22 remove --global neuroarxiv --yes
+npx skills@1.5.22 update neuroarxiv --global --yes
+npx skills@1.5.22 remove neuroarxiv --global --yes
 ```
 
 Do not pass an Agent filter when removing the complete Skill: the manager must
@@ -83,9 +83,12 @@ The default budget is:
 - at most 3 load-bearing full-text readings;
 - at most 1 caller-authored mechanism expansion.
 
+Research Evidence coverage is `ready`, `thin`, `empty`, or `unavailable`; the
+last two distinguish a successful zero-match Search Plan from a failed source.
 The Research Run ends as `Complete`, `Thin Coverage`, or
 `Incomplete Research Run`. It never pads a weak result set or invents a
-citation to force a recommendation.
+citation to force a recommendation, and every incomplete outcome names one
+explicit reason.
 
 ## Deterministic adapter
 
@@ -103,12 +106,17 @@ npx github:vonbai/neuroarxiv-skill search \
   --output "$evidence_file"
 ```
 
-The caller must supply the Search Plan. The adapter does not select categories,
-score Papers, cluster Architectural Angles, or choose a path. It claims the
-fresh output path before retrieval, reports liveness on stderr, and atomically
-publishes one complete JSON Evidence Artifact. Resume the same process when an
-execution tool yields; read the file only after exit status 0. The `--json` flag
-remains available for synchronous callers that deliberately consume stdout.
+The caller supplies the Search Plan. The adapter does not select categories,
+score Papers, cluster Architectural Angles, or choose a path. `--output` is its
+only result interface: the adapter claims that fresh path before retrieval,
+reports liveness on stderr, and atomically publishes one complete JSON Evidence
+Artifact. Resume the same process when an execution tool yields and read the file
+only after exit status 0.
+
+Inside that narrow interface, the Research Run serializes every request, retains
+the complete retry chain, enforces one wall-clock deadline, and stops the source
+after one Search Attempt exhausts recovery. Expansion is used only for semantic
+recall after the entire initial phase succeeds with thin coverage.
 
 ## Architecture
 
@@ -120,7 +128,7 @@ Caller Agent authors Search Plan
               │
               ▼
 Research Run module
-  serialize → query → retry → parse → normalize → deduplicate → bound
+  serialize → query → trace → retry → stop/expand → normalize → bound
               │
               ▼
 Versioned Research Evidence
@@ -136,8 +144,8 @@ The public package interface is intentionally narrow:
 
 - `collectResearchEvidence` collects deterministic arXiv evidence.
 - `validateResearchRun` checks budgets, isolation declarations, Paper identity,
-  Paper accounting, outcome status, and typed Evidence Chains without making
-  semantic judgments.
+  Paper accounting, Retrieval Termination, explicit incomplete outcomes, and
+  typed Evidence Chains without making semantic judgments.
 
 The domain glossary and architecture decisions live in
 [`CONTEXT.md`](./CONTEXT.md) and [`docs/adr`](./docs/adr). The accepted upgrade

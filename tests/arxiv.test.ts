@@ -158,3 +158,120 @@ test("gateway applies bounded recovery to a transient transport failure", async 
   });
   assert.equal(requests, 2);
 });
+
+test("gateway preserves the complete throttling-to-timeout failure chain", async () => {
+  let requests = 0;
+  const gateway = createArxivGateway({
+    requestDelayMs: 0,
+    sleep: async () => undefined,
+    fetch: async () => {
+      requests += 1;
+      if (requests === 1) {
+        return new Response("busy", {
+          status: 429,
+          headers: { "retry-after": "0" },
+        });
+      }
+      throw new DOMException("timed out", "AbortError");
+    },
+  });
+
+  const outcome = await gateway.search({
+    category: "cs.SE",
+    terms: ["change impact analysis"],
+    maxResults: 4,
+    sinceYears: 8,
+  });
+
+  assert.equal(outcome.status, "failed");
+  assert.deepEqual(outcome.requests, [
+    {
+      sequence: 1,
+      status: "failed",
+      failure: {
+        kind: "throttled",
+        message: "arXiv API returned 429",
+        retryable: true,
+        httpStatus: 429,
+        retryAfterMs: 0,
+      },
+    },
+    {
+      sequence: 2,
+      status: "failed",
+      failure: {
+        kind: "timeout",
+        message: "arXiv request timed out",
+        retryable: true,
+      },
+    },
+  ]);
+});
+
+test("gateway bounds Retry-After by the Retrieval Run deadline", async () => {
+  let now = Date.UTC(2026, 7, 12);
+  const sleeps: number[] = [];
+  const gateway = createArxivGateway({
+    now: () => now,
+    requestDelayMs: 0,
+    retrievalTimeoutMs: 60_000,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      now += ms;
+    },
+    fetch: async () =>
+      new Response("busy", {
+        status: 429,
+        headers: { "retry-after": "86400" },
+      }),
+  });
+
+  const outcome = await gateway.search({
+    category: "cs.SE",
+    terms: ["software provenance"],
+    maxResults: 4,
+    sinceYears: 8,
+  });
+
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.status, "failed");
+  if (outcome.status === "failed") {
+    assert.equal(outcome.failure.kind, "deadline-exhausted");
+  }
+  assert.deepEqual(sleeps, []);
+});
+
+test("gateway does not retry rejected requests or invalid Atom responses", async () => {
+  for (const fixture of [
+    {
+      response: new Response("bad query", { status: 400 }),
+      kind: "request-rejected",
+    },
+    {
+      response: new Response("<html>temporary proxy page</html>", { status: 200 }),
+      kind: "invalid-response",
+    },
+  ] as const) {
+    let requests = 0;
+    const gateway = createArxivGateway({
+      requestDelayMs: 0,
+      maxRetries: 4,
+      sleep: async () => undefined,
+      fetch: async () => {
+        requests += 1;
+        return fixture.response.clone();
+      },
+    });
+
+    const outcome = await gateway.search({
+      category: "cs.SE",
+      terms: ["software provenance"],
+      maxResults: 4,
+      sinceYears: 8,
+    });
+
+    assert.equal(outcome.status, "failed");
+    if (outcome.status === "failed") assert.equal(outcome.failure.kind, fixture.kind);
+    assert.equal(requests, 1);
+  }
+});

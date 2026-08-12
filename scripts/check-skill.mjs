@@ -33,7 +33,11 @@ requireCondition(existsSync(join(skillDir, "agents", "openai.yaml")), "missing A
 requireCondition(
   skill.includes('--output "$evidence_file"') &&
     skill.includes("continue that same handle") &&
-    /Evidence Artifact is the single source of\s+truth/.test(skill),
+    /Evidence Artifact is the single source of\s+truth/.test(skill) &&
+    skill.includes("one wall-clock deadline") &&
+    skill.includes('research-evidence-empty') &&
+    skill.includes('research-evidence-unavailable') &&
+    !skill.includes("--json"),
   "Skill must preserve the single-owner Evidence Artifact journey",
 );
 for (const file of [...RUNTIME_FILES, "package.json"]) {
@@ -47,14 +51,25 @@ requireCondition(/default_prompt: "Use \$neuroarxiv /.test(metadata), "default p
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 requireCondition(!packageJson.dependencies, "production dependencies must stay empty");
 requireCondition(packageJson.name === "neuroarxiv-skill", "package identity is stale");
+requireCondition(
+  readFileSync(join(root, "src", "arxiv.ts"), "utf8").includes(
+    `neuroarxiv-skill/${packageJson.version}`,
+  ),
+  "arXiv User-Agent must match the package version",
+);
 
 const readme = readFileSync(join(root, "README.md"), "utf8");
+requireCondition(!readme.includes("--json"), "README must preserve one Evidence Artifact result path");
 requireCondition(
   readme.includes(`npx skills@${SKILLS_CLI_VERSION} add vonbai/neuroarxiv-skill`),
   "README install command must use the verified Skills CLI version",
 );
 requireCondition(
-  readme.includes(`npx skills@${SKILLS_CLI_VERSION} remove --global neuroarxiv --yes`),
+  readme.includes(`npx skills@${SKILLS_CLI_VERSION} update neuroarxiv --global --yes`),
+  "README update command must use the verified Skills CLI version",
+);
+requireCondition(
+  readme.includes(`npx skills@${SKILLS_CLI_VERSION} remove neuroarxiv --global --yes`),
   "README removal command must use the verified Skills CLI version",
 );
 

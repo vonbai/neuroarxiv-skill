@@ -52,6 +52,14 @@ _Avoid_: Retry worker, duplicate command
 The immutable JSON file atomically published by the Retrieval Owner and reused verbatim for the remainder of the Research Run.
 _Avoid_: Stdout capture, partial result, search log
 
+**Retrieval Failure**:
+A traceable account of why one Search Attempt could not obtain Research Evidence after its bounded recovery.
+_Avoid_: Error string, exception message
+
+**Retrieval Termination**:
+The declared reason deterministic Research Evidence collection stopped, whether because the initial Paper budget target was satisfied, the Search Plan was exhausted, or retrieval failed.
+_Avoid_: Process exit, last log line
+
 **Documentation Evidence**:
 Version-specific documentation or examples for a known dependency that support claims about its current, intended use.
 _Avoid_: Prior art, mechanism validation, implementation proof
@@ -85,7 +93,7 @@ The point at which additional relevant Papers repeat the mechanisms, limitations
 _Avoid_: Search exhaustion, paper quota, consensus
 
 **Evidence Coverage**:
-The declared status and reason for each evidence role in a Research Run, including evidence used, Thin Coverage, inapplicability, or unavailability.
+The declared availability of an evidence role in a Research Run, distinguishing ready, thin, successfully empty, and unavailable Research Evidence.
 _Avoid_: Capability Manifest, tool inventory, source count
 
 **Thin Coverage**:
@@ -95,6 +103,10 @@ _Avoid_: Retrieval failure, empty result
 **Incomplete Research Run**:
 A Research Run that cannot produce a valid Recommended Path because isolation, validation, or its Evidence Chain remains broken after bounded recovery.
 _Avoid_: Thin Coverage, partial success
+
+**Incomplete Reason**:
+The single explicit condition that prevents an Incomplete Research Run from producing a Recommended Path.
+_Avoid_: Open Thread, generic caveat
 
 **Open Thread**:
 A consequential question that the retrieved Papers do not answer and that must remain visible for later design review.

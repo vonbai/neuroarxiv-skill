@@ -2,10 +2,9 @@ import { createArxivGateway, mergePaper } from "./arxiv.js";
 const DEFAULT_BUDGET = {
     maxPapers: 12,
     maxFullTextPapers: 3,
-    papersPerCategory: 4,
-    maxExpansions: 1,
 };
 const READY_PAPER_COUNT = 3;
+const PAPERS_PER_CATEGORY = 4;
 function looksLikeCategoryId(id) {
     return /^[a-z-]+(\.[A-Za-z-]{2,12})?$/.test(id.trim());
 }
@@ -56,29 +55,18 @@ function mergeBatches(batches, maxPapers) {
     }
     return [...byId.values()];
 }
-function coverageFor(papers, failedAttempts) {
+function coverageFor(papers, termination) {
     if (papers.length === 0) {
         return {
-            status: "unavailable",
-            reason: failedAttempts > 0
-                ? "No Research Evidence was retrieved after bounded recovery; one or more arXiv requests failed."
-                : "No Research Evidence matched the caller-authored Search Plan after bounded retrieval.",
+            status: termination.reason === "retrieval-failed" ? "unavailable" : "empty",
         };
     }
     if (papers.length < READY_PAPER_COUNT) {
-        return {
-            status: "thin",
-            reason: `Only ${papers.length} Paper${papers.length === 1 ? "" : "s"} was retrieved; the caller Agent must keep the recommendation bounded.`,
-        };
+        return { status: "thin" };
     }
-    return {
-        status: "ready",
-        reason: failedAttempts > 0
-            ? `${papers.length} Papers were retrieved, with partial category failures declared in the attempts.`
-            : `${papers.length} Papers were retrieved within the Research Run budget.`,
-    };
+    return { status: "ready" };
 }
-export function createResearchEvidenceCollector(gateway = createArxivGateway()) {
+export function createResearchEvidenceCollector(gateway) {
     return async function collect(request) {
         const problem = request.problem.trim();
         if (!problem)
@@ -91,89 +79,73 @@ export function createResearchEvidenceCollector(gateway = createArxivGateway()) 
         const sinceYears = boundedInteger(request.searchPlan.sinceYears, 8, "searchPlan.sinceYears", 0, 100);
         const budget = {
             maxPapers: boundedInteger(request.budget?.maxPapers, DEFAULT_BUDGET.maxPapers, "budget.maxPapers", 1, 100),
-            papersPerCategory: boundedInteger(request.budget?.papersPerCategory, DEFAULT_BUDGET.papersPerCategory, "budget.papersPerCategory", 1, 25),
             maxFullTextPapers: boundedInteger(request.budget?.maxFullTextPapers, DEFAULT_BUDGET.maxFullTextPapers, "budget.maxFullTextPapers", 0, 20),
-            maxExpansions: boundedInteger(request.budget?.maxExpansions, DEFAULT_BUDGET.maxExpansions, "budget.maxExpansions", 0, 1),
         };
         const attempts = [];
-        const initialBatches = [];
-        for (const category of categories) {
-            try {
-                const papers = await gateway.search({
+        const batches = [];
+        async function collectPhase(phase, phaseTerms) {
+            for (const category of categories) {
+                const outcome = await gateway.search({
                     category: category.id,
-                    terms,
-                    maxResults: budget.papersPerCategory,
+                    terms: phaseTerms,
+                    maxResults: PAPERS_PER_CATEGORY,
                     sinceYears,
                 });
-                initialBatches.push(papers);
+                if (outcome.status === "succeeded") {
+                    batches.push(outcome.papers);
+                    attempts.push({
+                        phase,
+                        category: category.id,
+                        terms: phaseTerms,
+                        status: "succeeded",
+                        paperCount: outcome.papers.length,
+                        requests: outcome.requests,
+                    });
+                    continue;
+                }
                 attempts.push({
-                    phase: "initial",
+                    phase,
                     category: category.id,
-                    terms,
-                    paperCount: papers.length,
-                });
-            }
-            catch (error) {
-                initialBatches.push([]);
-                attempts.push({
-                    phase: "initial",
-                    category: category.id,
-                    terms,
+                    terms: phaseTerms,
+                    status: "failed",
                     paperCount: 0,
-                    failure: error instanceof Error ? error.message : String(error),
+                    requests: outcome.requests,
+                    failure: outcome.failure,
                 });
+                return { reason: "retrieval-failed", phase, category: category.id };
             }
+            return null;
         }
-        let papers = mergeBatches(initialBatches, budget.maxPapers);
-        const shouldExpand = papers.length < READY_PAPER_COUNT &&
-            budget.maxExpansions === 1 &&
-            expansionTerms.length > 0;
-        if (shouldExpand) {
-            const expansionBatches = [];
-            for (const category of categories) {
-                try {
-                    const expanded = await gateway.search({
-                        category: category.id,
-                        terms: expansionTerms,
-                        maxResults: budget.papersPerCategory,
-                        sinceYears,
-                    });
-                    expansionBatches.push(expanded);
-                    attempts.push({
-                        phase: "expansion",
-                        category: category.id,
-                        terms: expansionTerms,
-                        paperCount: expanded.length,
-                    });
-                }
-                catch (error) {
-                    expansionBatches.push([]);
-                    attempts.push({
-                        phase: "expansion",
-                        category: category.id,
-                        terms: expansionTerms,
-                        paperCount: 0,
-                        failure: error instanceof Error ? error.message : String(error),
-                    });
-                }
-            }
-            papers = mergeBatches([...initialBatches, ...expansionBatches], budget.maxPapers);
+        let termination;
+        const initialFailure = await collectPhase("initial", terms);
+        let papers = mergeBatches(batches, budget.maxPapers);
+        if (initialFailure) {
+            termination = initialFailure;
         }
-        const failedAttempts = attempts.filter((attempt) => attempt.failure).length;
+        else if (papers.length >= Math.min(READY_PAPER_COUNT, budget.maxPapers)) {
+            termination = { reason: "initial-budget-satisfied" };
+        }
+        else if (expansionTerms.length > 0) {
+            const expansionFailure = await collectPhase("expansion", expansionTerms);
+            papers = mergeBatches(batches, budget.maxPapers);
+            termination = expansionFailure ?? { reason: "search-plan-exhausted" };
+        }
+        else {
+            termination = { reason: "search-plan-exhausted" };
+        }
         return {
             problem,
             searchPlan: { categories, terms, expansionTerms, sinceYears },
             budget,
             papers,
             attempts,
-            expansionUsed: shouldExpand,
-            coverage: coverageFor(papers, failedAttempts),
+            coverage: coverageFor(papers, termination),
+            termination,
         };
     };
 }
-const defaultCollector = createResearchEvidenceCollector();
 export function collectResearchEvidence(request) {
-    return defaultCollector(request);
+    return createResearchEvidenceCollector(createArxivGateway())(request);
 }
 function requireText(value, path, errors) {
     if (typeof value !== "string" || !value.trim())
@@ -244,10 +216,6 @@ function expectString(value, path, errors) {
     if (typeof value !== "string")
         errors.push(`${path} must be a string`);
 }
-function expectBoolean(value, path, errors) {
-    if (typeof value !== "boolean")
-        errors.push(`${path} must be a boolean`);
-}
 function expectInteger(value, path, errors, min = Number.MIN_SAFE_INTEGER, max = Number.MAX_SAFE_INTEGER) {
     if (!Number.isInteger(value) || value < min || value > max) {
         errors.push(`${path} must be an integer between ${min} and ${max}`);
@@ -262,12 +230,49 @@ function expectStringArray(value, path, errors) {
     const values = expectArray(value, path, errors);
     values?.forEach((item, index) => expectString(item, `${path}[${index}]`, errors));
 }
+const RETRIEVAL_FAILURE_KINDS = [
+    "throttled",
+    "timeout",
+    "transport",
+    "server",
+    "request-rejected",
+    "invalid-response",
+    "deadline-exhausted",
+];
+function validateRetrievalFailureShape(value, path, errors) {
+    const failure = expectObject(value, path, errors);
+    if (!failure)
+        return;
+    expectEnum(failure.kind, RETRIEVAL_FAILURE_KINDS, `${path}.kind`, errors);
+    expectString(failure.message, `${path}.message`, errors);
+    if (typeof failure.retryable !== "boolean")
+        errors.push(`${path}.retryable must be a boolean`);
+    if (failure.httpStatus !== undefined) {
+        expectInteger(failure.httpStatus, `${path}.httpStatus`, errors, 100, 599);
+    }
+    if (failure.retryAfterMs !== undefined) {
+        expectInteger(failure.retryAfterMs, `${path}.retryAfterMs`, errors, 0);
+    }
+}
 function validateResearchRunShape(input, errors) {
     const run = expectObject(input, "Research Run", errors);
     if (!run)
         return false;
     expectEnum(run.status, ["complete", "thin", "incomplete"], "status", errors);
     expectString(run.problem, "problem", errors);
+    if (run.incompleteReason !== null) {
+        const reason = expectObject(run.incompleteReason, "incompleteReason", errors);
+        if (reason) {
+            expectEnum(reason.kind, [
+                "research-evidence-empty",
+                "research-evidence-unavailable",
+                "isolation-broken",
+                "evidence-chain-broken",
+                "validation-failed",
+            ], "incompleteReason.kind", errors);
+            expectString(reason.detail, "incompleteReason.detail", errors);
+        }
+    }
     const evidence = expectObject(run.researchEvidence, "researchEvidence", errors);
     if (evidence) {
         expectString(evidence.problem, "researchEvidence.problem", errors);
@@ -289,8 +294,6 @@ function validateResearchRunShape(input, errors) {
         if (budget) {
             expectInteger(budget.maxPapers, "researchEvidence.budget.maxPapers", errors, 1, 100);
             expectInteger(budget.maxFullTextPapers, "researchEvidence.budget.maxFullTextPapers", errors, 0, 20);
-            expectInteger(budget.papersPerCategory, "researchEvidence.budget.papersPerCategory", errors, 1, 25);
-            expectInteger(budget.maxExpansions, "researchEvidence.budget.maxExpansions", errors, 0, 1);
         }
         const papers = expectArray(evidence.papers, "researchEvidence.papers", errors);
         papers?.forEach((item, index) => {
@@ -320,16 +323,35 @@ function validateResearchRunShape(input, errors) {
             expectEnum(attempt.phase, ["initial", "expansion"], `researchEvidence.attempts[${index}].phase`, errors);
             expectString(attempt.category, `researchEvidence.attempts[${index}].category`, errors);
             expectStringArray(attempt.terms, `researchEvidence.attempts[${index}].terms`, errors);
+            expectEnum(attempt.status, ["succeeded", "failed"], `researchEvidence.attempts[${index}].status`, errors);
             expectInteger(attempt.paperCount, `researchEvidence.attempts[${index}].paperCount`, errors, 0);
-            if (attempt.failure !== undefined) {
-                expectString(attempt.failure, `researchEvidence.attempts[${index}].failure`, errors);
+            const requests = expectArray(attempt.requests, `researchEvidence.attempts[${index}].requests`, errors);
+            requests?.forEach((item, requestIndex) => {
+                const requestPath = `researchEvidence.attempts[${index}].requests[${requestIndex}]`;
+                const request = expectObject(item, requestPath, errors);
+                if (!request)
+                    return;
+                expectInteger(request.sequence, `${requestPath}.sequence`, errors, 1);
+                expectEnum(request.status, ["succeeded", "failed"], `${requestPath}.status`, errors);
+                if (request.status === "failed") {
+                    validateRetrievalFailureShape(request.failure, `${requestPath}.failure`, errors);
+                }
+            });
+            if (attempt.status === "failed") {
+                validateRetrievalFailureShape(attempt.failure, `researchEvidence.attempts[${index}].failure`, errors);
             }
         });
-        expectBoolean(evidence.expansionUsed, "researchEvidence.expansionUsed", errors);
         const coverage = expectObject(evidence.coverage, "researchEvidence.coverage", errors);
         if (coverage) {
-            expectEnum(coverage.status, ["ready", "thin", "unavailable"], "researchEvidence.coverage.status", errors);
-            expectString(coverage.reason, "researchEvidence.coverage.reason", errors);
+            expectEnum(coverage.status, ["ready", "thin", "empty", "unavailable"], "researchEvidence.coverage.status", errors);
+        }
+        const termination = expectObject(evidence.termination, "researchEvidence.termination", errors);
+        if (termination) {
+            expectEnum(termination.reason, ["initial-budget-satisfied", "search-plan-exhausted", "retrieval-failed"], "researchEvidence.termination.reason", errors);
+            if (termination.reason === "retrieval-failed") {
+                expectEnum(termination.phase, ["initial", "expansion"], "researchEvidence.termination.phase", errors);
+                expectString(termination.category, "researchEvidence.termination.category", errors);
+            }
         }
     }
     const findings = expectArray(run.findings, "findings", errors);
@@ -426,22 +448,107 @@ export function validateResearchRun(input) {
         errors.push("researchEvidence exceeds its recorded Paper budget");
     }
     const expansionAttempts = run.researchEvidence.attempts.filter((attempt) => attempt.phase === "expansion");
-    if (run.researchEvidence.expansionUsed && expansionAttempts.length === 0) {
-        errors.push("expansionUsed requires expansion attempts");
-    }
-    if (!run.researchEvidence.expansionUsed && expansionAttempts.length > 0) {
-        errors.push("expansion attempts require expansionUsed");
-    }
-    if (run.researchEvidence.expansionUsed && run.researchEvidence.budget.maxExpansions === 0) {
-        errors.push("expansionUsed exceeds the recorded expansion budget");
-    }
-    if (run.researchEvidence.expansionUsed && run.researchEvidence.searchPlan.expansionTerms.length === 0) {
-        errors.push("expansionUsed requires caller-authored expansion terms");
-    }
     const coverage = run.researchEvidence.coverage.status;
     const paperCount = run.researchEvidence.papers.length;
-    if (coverage === "unavailable" && paperCount !== 0) {
-        errors.push("unavailable Research Evidence cannot contain Papers");
+    const plannedCategories = run.researchEvidence.searchPlan.categories.map((category) => category.id);
+    const attemptKeys = new Set();
+    let sawExpansion = false;
+    run.researchEvidence.attempts.forEach((attempt, index) => {
+        if (!plannedCategories.includes(attempt.category)) {
+            errors.push(`researchEvidence.attempts[${index}] uses an unplanned category`);
+        }
+        const key = `${attempt.phase}:${attempt.category}`;
+        if (attemptKeys.has(key))
+            errors.push(`duplicate Search Attempt ${key}`);
+        attemptKeys.add(key);
+        if (attempt.phase === "expansion")
+            sawExpansion = true;
+        if (attempt.phase === "initial" && sawExpansion) {
+            errors.push("initial Search Attempts must precede expansion attempts");
+        }
+        const expectedTerms = attempt.phase === "initial"
+            ? run.researchEvidence.searchPlan.terms
+            : run.researchEvidence.searchPlan.expansionTerms;
+        if (JSON.stringify(attempt.terms) !== JSON.stringify(expectedTerms)) {
+            errors.push(`researchEvidence.attempts[${index}] terms do not match its Search Plan phase`);
+        }
+        attempt.requests.forEach((request, requestIndex) => {
+            if (request.sequence !== requestIndex + 1) {
+                errors.push(`researchEvidence.attempts[${index}] request sequence is not contiguous`);
+            }
+        });
+    });
+    if (expansionAttempts.length > 0 &&
+        run.researchEvidence.searchPlan.expansionTerms.length === 0) {
+        errors.push("expansion attempts require caller-authored expansion terms");
+    }
+    const firstFailedAttempt = run.researchEvidence.attempts.findIndex((attempt) => attempt.status === "failed");
+    if (firstFailedAttempt !== -1 &&
+        firstFailedAttempt !== run.researchEvidence.attempts.length - 1) {
+        errors.push("retrieval must stop after the first failed Search Attempt");
+    }
+    run.researchEvidence.attempts.forEach((attempt, index) => {
+        const lastRequest = attempt.requests.at(-1);
+        if (attempt.status === "succeeded") {
+            if (!lastRequest || lastRequest.status !== "succeeded") {
+                errors.push(`researchEvidence.attempts[${index}] succeeded without a successful request`);
+            }
+        }
+        else {
+            if (attempt.paperCount !== 0) {
+                errors.push(`researchEvidence.attempts[${index}] failed with a non-zero Paper count`);
+            }
+            if (!attempt.failure) {
+                errors.push(`researchEvidence.attempts[${index}] failed without a terminal failure`);
+            }
+        }
+    });
+    const termination = run.researchEvidence.termination;
+    if (termination.reason === "initial-budget-satisfied" && expansionAttempts.length > 0) {
+        errors.push("initial budget satisfaction cannot contain expansion attempts");
+    }
+    const successfulInitialCategories = new Set(run.researchEvidence.attempts
+        .filter((attempt) => attempt.phase === "initial" && attempt.status === "succeeded")
+        .map((attempt) => attempt.category));
+    const successfulExpansionCategories = new Set(run.researchEvidence.attempts
+        .filter((attempt) => attempt.phase === "expansion" && attempt.status === "succeeded")
+        .map((attempt) => attempt.category));
+    if (expansionAttempts.length > 0 &&
+        successfulInitialCategories.size !== plannedCategories.length) {
+        errors.push("expansion requires a fully successful initial phase");
+    }
+    if (termination.reason !== "retrieval-failed" &&
+        successfulInitialCategories.size !== plannedCategories.length) {
+        errors.push("completed retrieval requires every planned initial Search Attempt");
+    }
+    if (termination.reason === "initial-budget-satisfied" &&
+        paperCount < Math.min(READY_PAPER_COUNT, run.researchEvidence.budget.maxPapers)) {
+        errors.push("initial-budget-satisfied termination requires its recorded Paper target");
+    }
+    if (termination.reason === "search-plan-exhausted" &&
+        run.researchEvidence.searchPlan.expansionTerms.length > 0 &&
+        successfulExpansionCategories.size !== plannedCategories.length) {
+        errors.push("exhausted expanded Search Plan requires every planned expansion attempt");
+    }
+    if (termination.reason === "retrieval-failed") {
+        const failed = run.researchEvidence.attempts.at(-1);
+        if (!failed ||
+            failed.status !== "failed" ||
+            failed.phase !== termination.phase ||
+            failed.category !== termination.category) {
+            errors.push("retrieval-failed termination must reference the final failed Search Attempt");
+        }
+    }
+    else if (firstFailedAttempt !== -1) {
+        errors.push("a failed Search Attempt requires retrieval-failed termination");
+    }
+    if (coverage === "unavailable" &&
+        (paperCount !== 0 || termination.reason !== "retrieval-failed")) {
+        errors.push("unavailable Research Evidence requires zero Papers and failed retrieval");
+    }
+    if (coverage === "empty" &&
+        (paperCount !== 0 || termination.reason === "retrieval-failed")) {
+        errors.push("empty Research Evidence requires zero Papers and an exhausted successful Search Plan");
     }
     if (coverage === "thin" && (paperCount === 0 || paperCount >= READY_PAPER_COUNT)) {
         errors.push(`thin Research Evidence requires 1-${READY_PAPER_COUNT - 1} Papers`);
@@ -496,9 +603,34 @@ export function validateResearchRun(input) {
         if (run.recommendedPath !== null) {
             errors.push("an incomplete Research Run cannot contain a Recommended Path");
         }
+        if (run.incompleteReason === null) {
+            errors.push("an incomplete Research Run requires incompleteReason");
+        }
+        else {
+            requireText(run.incompleteReason.detail, "incompleteReason.detail", errors);
+        }
     }
     else if (run.recommendedPath === null) {
         errors.push(`${run.status} Research Run requires one Recommended Path`);
+    }
+    else if (run.incompleteReason !== null) {
+        errors.push(`${run.status} Research Run cannot contain incompleteReason`);
+    }
+    if (coverage === "unavailable" &&
+        (run.status !== "incomplete" ||
+            run.incompleteReason?.kind !== "research-evidence-unavailable")) {
+        errors.push("unavailable Research Evidence requires an incomplete unavailable outcome");
+    }
+    if (coverage === "empty" &&
+        (run.status !== "incomplete" || run.incompleteReason?.kind !== "research-evidence-empty")) {
+        errors.push("empty Research Evidence requires an incomplete empty outcome");
+    }
+    if (run.incompleteReason?.kind === "research-evidence-unavailable" &&
+        coverage !== "unavailable") {
+        errors.push("research-evidence-unavailable requires unavailable Research Evidence");
+    }
+    if (run.incompleteReason?.kind === "research-evidence-empty" && coverage !== "empty") {
+        errors.push("research-evidence-empty requires empty Research Evidence");
     }
     const usableFindingCount = run.findings.filter((finding) => paperVersions.has(finding.paperVersion) && finding.isolationStatus !== "broken").length;
     if (run.status === "complete" &&

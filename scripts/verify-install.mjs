@@ -27,7 +27,7 @@ const sourceSmoke = spawnSync(
 if (
   sourceSmoke.status !== 0 ||
   !sourceSmoke.stdout.includes("caller-selected arXiv categories and reasons") ||
-  !sourceSmoke.stdout.includes("atomically publish JSON instead")
+  !sourceSmoke.stdout.includes("required fresh path for the one Evidence Artifact")
 ) {
   throw new Error(sourceSmoke.stderr || "self-contained Skill helper failed its smoke check");
 }
@@ -146,7 +146,7 @@ try {
   }
   assertInstalledBundle();
 
-  run(["update", "--global", "neuroarxiv", "--yes"]);
+  run(["update", "neuroarxiv", "--global", "--yes"]);
   if (!existsSync(join(canonical, "SKILL.md")) || !lstatSync(claudeLink).isSymbolicLink()) {
     throw new Error("standard updater did not preserve the canonical Skill and Agent symlink");
   }
@@ -160,7 +160,7 @@ try {
   if (
     installedSmoke.status !== 0 ||
     !installedSmoke.stdout.includes("caller-selected arXiv categories and reasons") ||
-    !installedSmoke.stdout.includes("atomically publish JSON instead")
+    !installedSmoke.stdout.includes("required fresh path for the one Evidence Artifact")
   ) {
     throw new Error(installedSmoke.stderr || "installed search wrapper failed its smoke check");
   }
@@ -188,7 +188,8 @@ try {
       "retry suppression",
       "--max-full-text-papers",
       "21",
-      "--json",
+      "--output",
+      join(testRoot, "invalid-budget-evidence.json"),
     ],
     { encoding: "utf8" },
   );
@@ -199,7 +200,7 @@ try {
     throw new Error("installed search wrapper did not propagate the full-text budget flag");
   }
 
-  run(["remove", "--global", "neuroarxiv", "--yes"]);
+  run(["remove", "neuroarxiv", "--global", "--yes"]);
 
   if (pathExists(canonical) || pathExists(claudeLink)) {
     throw new Error("standard uninstaller left the Skill or an Agent symlink behind");
