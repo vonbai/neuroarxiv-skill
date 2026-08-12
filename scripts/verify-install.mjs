@@ -177,27 +177,29 @@ try {
       installedValidationSmoke.stderr || "installed validation wrapper failed its smoke check",
     );
   }
-  const budgetFlagSmoke = spawnSync(
-    process.execPath,
-    [
-      join(canonical, "scripts", "search.mjs"),
-      "Budget propagation smoke",
-      "--categories",
-      "cs.DC",
-      "--terms",
-      "retry suppression",
-      "--max-full-text-papers",
-      "21",
-      "--output",
-      join(testRoot, "invalid-budget-evidence.json"),
-    ],
-    { encoding: "utf8" },
-  );
-  if (
-    budgetFlagSmoke.status === 0 ||
-    !budgetFlagSmoke.stderr.includes("budget.maxFullTextPapers")
-  ) {
-    throw new Error("installed search wrapper did not propagate the full-text budget flag");
+  for (const [flag, value, field] of [
+    ["--max-papers", "101", "budget.maxPapers"],
+    ["--max-full-text-papers", "21", "budget.maxFullTextPapers"],
+  ]) {
+    const budgetFlagSmoke = spawnSync(
+      process.execPath,
+      [
+        join(canonical, "scripts", "search.mjs"),
+        "Budget propagation smoke",
+        "--categories",
+        "cs.DC",
+        "--terms",
+        "retry suppression",
+        flag,
+        value,
+        "--output",
+        join(testRoot, `invalid-${field.replace(".", "-")}.json`),
+      ],
+      { encoding: "utf8" },
+    );
+    if (budgetFlagSmoke.status === 0 || !budgetFlagSmoke.stderr.includes(field)) {
+      throw new Error(`installed search wrapper did not propagate ${flag}`);
+    }
   }
 
   run(["remove", "neuroarxiv", "--global", "--yes"]);

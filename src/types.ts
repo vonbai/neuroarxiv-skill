@@ -109,7 +109,7 @@ export type EvidenceDepth = "abstract" | "full-text";
 export type PriorArtFinding = {
   paperVersion: string;
   evidenceDepth: EvidenceDepth;
-  isolationStatus: "isolated" | "recovered" | "broken";
+  isolationStatus: "isolated" | "recovered";
   approach: string;
   borrow: string;
   limitation: string;
@@ -138,6 +138,12 @@ export type EvidenceCitation = ResearchEvidenceCitation | DocumentationEvidenceC
 export type ExcludedPaper = {
   paperVersion: string;
   reason: string;
+};
+
+export type ReadingFailure = {
+  paperVersion: string;
+  kind: "isolation-broken";
+  detail: string;
 };
 
 export type RecommendedPath = {
@@ -172,6 +178,7 @@ export type IncompleteReason = {
     | "evidence-chain-broken"
     | "validation-failed";
   detail: string;
+  reentryCondition: string;
 };
 
 export type ResearchRunArtifact = {
@@ -181,6 +188,7 @@ export type ResearchRunArtifact = {
   researchEvidence: ResearchEvidenceResult;
   findings: PriorArtFinding[];
   excludedPapers: ExcludedPaper[];
+  readingFailures: ReadingFailure[];
   angles: ArchitecturalAngle[];
   recommendedPath: RecommendedPath | null;
   alternates: AlternatePath[];

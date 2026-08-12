@@ -15,7 +15,7 @@ captured stdout.
     {
       "paperVersion": "2601.00001v2",
       "evidenceDepth": "abstract | full-text",
-      "isolationStatus": "isolated | recovered | broken",
+      "isolationStatus": "isolated | recovered",
       "approach": "mechanism",
       "borrow": "concrete implementation takeaway",
       "limitation": "reported breaking condition",
@@ -28,6 +28,7 @@ captured stdout.
       "reason": "specific reason this retained Paper is irrelevant"
     }
   ],
+  "readingFailures": [],
   "angles": [
     {
       "label": "underlying mechanism",
@@ -79,13 +80,26 @@ Use `incompleteReason: null` for Complete or Thin Coverage. For `incomplete`, us
 ```json
 {
   "kind": "research-evidence-empty | research-evidence-unavailable | isolation-broken | evidence-chain-broken | validation-failed",
-  "detail": "the concrete condition that stopped this Research Run"
+  "detail": "the concrete condition that stopped this Research Run",
+  "reentryCondition": "the concrete change that would justify a new Research Run"
+}
+```
+
+For `isolation-broken`, account for each affected Paper without fabricating a
+successful Finding or Exclusion:
+
+```json
+{
+  "paperVersion": "2601.00003v1",
+  "kind": "isolation-broken",
+  "detail": "sibling Paper context persisted after one clean re-read"
 }
 ```
 
 Complete requires ready retrieval coverage and at least three usable findings.
 Thin Coverage requires available retrieval coverage and one or two usable
 findings; this remains true when a larger retrieved set contains reasoned
-exclusions. Every retained Paper must appear exactly once in `findings` or
-`excludedPapers`. Documentation citations must match the declared
+exclusions. Every retained Paper must appear exactly once in `findings`,
+`excludedPapers`, or `readingFailures`. A Reading Failure is valid only for an
+Incomplete `isolation-broken` outcome. Documentation citations must match the declared
 `sourceIdentity` exactly.

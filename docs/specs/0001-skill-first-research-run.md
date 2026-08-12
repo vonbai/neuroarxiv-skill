@@ -46,7 +46,7 @@ Research Evidence from arXiv is the product's core evidence. One fresh Retrieval
 28. As a maintainer, I want the Skill and supporting CLI to share one deterministic retrieval implementation, so that request, parsing, budget, and identity rules cannot drift.
 29. As a maintainer, I want semantic judgment to remain outside the deterministic module, so that no hidden LLM, model selection, or provider credential becomes a second owner.
 30. As a maintainer, I want the installed Skill bundle to include every required reference, so that installation cannot silently omit part of the workflow.
-31. As a reviewer, I want every retained Paper to have one finding or explicit exclusion, so that unread evidence cannot disappear from the Research Run.
+31. As a reviewer, I want every retained Paper to have one Finding, Exclusion, or Reading Failure, so that unread or unreadable evidence cannot disappear from the Research Run.
 32. As a user of multiple coding Agents, I want one canonical Skill copy with Agent-specific links and one removal command, so that installs cannot drift or leave unowned files behind.
 33. As an Agent using an execution tool that yields before a long command exits, I want to resume the same Retrieval Owner, so that an empty initial output chunk cannot trigger duplicate arXiv requests.
 34. As a caller consuming structured Research Evidence, I want one atomically published Evidence Artifact, so that partial stdout, concurrent retries, and overwritten results cannot become competing sources of truth.
@@ -55,6 +55,11 @@ Research Evidence from arXiv is the product's core evidence. One fresh Retrieval
 37. As a builder, I want successful zero-match retrieval distinguished from source unavailability, so that I know whether to revise the Search Plan or restore access.
 38. As a caller, I want bounded recovery to include a wall-clock deadline, so that a large `Retry-After` value cannot make a Research Run wait indefinitely.
 39. As a reviewer, I want every Incomplete Research Run to name one Incomplete Reason, so that an honest failure is also actionable.
+40. As a reviewer, I want malformed Atom entries rejected before they become Papers, so that empty or untrusted metadata cannot enter an Evidence Chain.
+41. As a reviewer, I want every retained Paper to end as exactly one Finding, Exclusion, or Reading Failure, so that persistent isolation failure remains honest and accounted for.
+42. As a builder receiving an incomplete result, I want its re-entry condition stored with its reason, so that I know when a new Research Run would be worthwhile.
+43. As a caller overriding Paper budgets, I want every explicit override passed through the one Research Run seam, so that the recorded budget matches my intent.
+44. As a maintainer, I want conformance gates for entry, evidence routing, reading disposition, terminal reporting, and re-entry, so that the complete Skill journey cannot silently erode.
 
 ## Implementation Decisions
 
@@ -68,16 +73,19 @@ Research Evidence from arXiv is the product's core evidence. One fresh Retrieval
 - Date filtering is pushed into the arXiv Search Plan query when supported. Local filtering remains a defensive validation rather than the primary efficiency mechanism.
 - Retrieval is bounded by the Research Run budget. The default result set contains at most twelve deduplicated Papers and performs at most one mechanism-specific expansion after a fully successful initial phase.
 - Paper identity is version-aware. Deduplication uses the canonical bare arXiv identity while preserving the exact retrieved version and merging surfaced categories.
+- Atom entries missing versioned identity, title, abstract, author, or timestamps are invalid responses rather than Papers. Canonical abstract and PDF links derive only from the verified versioned identity. A malformed entry stops the source through the same structured Retrieval Failure path as other unusable responses.
+- The retained-Paper cap limits new bare identities, not reconciliation. The module continues scanning already retrieved batches after the cap so a selected Paper still receives its newest retrieved version and every surfaced category.
 - Category validation accepts valid arXiv taxonomy shapes and does not restrict the caller to the old curated subset. A bundled reference may aid category selection without becoming a programmatic allowlist.
 - The caller Agent performs all Isolated Readings. Each reading sees one Paper, the Build Problem, and only the minimal Decision Context needed for that reading.
 - Abstract reading is the default Evidence Depth. At most three load-bearing Papers are selected for full-text reading under the default budget.
 - Research Evidence owns claims about mechanisms, reported evaluation, applicable conditions, and stated limitations. Documentation Evidence owns claims about the current intended interface and constraints of a concrete dependency. The caller Agent owns the judgment connecting both to the Build Problem.
 - A missing dependency interface does not invalidate a Paper mechanism; it may imply custom implementation. An unresolved load-bearing conflict becomes an Open Thread or makes the Research Run incomplete.
 - Research Evidence citations resolve to exact Paper versions in the Research Run. Documentation Evidence citations resolve to the declared version/source identity. Unknown identifiers are validation failures and never receive synthesized URLs or titles.
-- Every retained Paper appears exactly once as a Prior-Art Finding or a reasoned Paper Exclusion.
+- A successful Isolated Reading produces either a Prior-Art Finding or a reasoned Paper Exclusion. Persistent contamination produces a Reading Failure instead; it is the Paper's sole disposition and requires an Incomplete `isolation-broken` outcome.
 - Evidence Saturation ends reading when additional relevant Papers repeat existing mechanisms, limitations, and trade-offs without changing the decision. Deterministic retrieval stops initial collection when it has ready coverage and does not claim semantic saturation.
 - Evidence Coverage is `ready`, `thin`, `empty`, or `unavailable`. `empty` means the applicable Search Plan completed successfully with no Paper; `unavailable` means retrieval failed before usable evidence was obtained.
 - Thin Coverage is a valid outcome when one or two usable findings still support a bounded recommendation, including when a larger retrieved set contains reasoned exclusions. Every Incomplete Research Run records one Incomplete Reason; it is required when Research Evidence is empty or unavailable, isolation is broken, validation fails, or a load-bearing Evidence Chain remains broken.
+- Every Incomplete Reason includes one concrete re-entry condition. It names the external change, recovered isolation, repaired evidence chain, or materially narrower future decision that would justify another Research Run.
 - The Skill declares static evidence obligations and final Evidence Coverage. It does not create a Capability Manifest or probe Skills, CLIs, MCP servers, connectors, credentials, or machine capacity.
 - Documentation lookup is conditional on a concrete dependency question. Context7 or similar caller-owned capabilities may satisfy that role, but no particular tool is required or hardcoded.
 - GitHub repository discovery, maturity scoring, admission, and execution are outside the product scope.
@@ -88,6 +96,7 @@ Research Evidence from arXiv is the product's core evidence. One fresh Retrieval
 - For the Skill journey, one helper process is the Retrieval Owner for one fresh Evidence Artifact path. The required `--output` interface is the only result path; a short-lived adjacent ownership marker rejects a second process before it can contact arXiv.
 - The Retrieval Owner reports liveness through stderr and atomically publishes the complete JSON file after collection. The Evidence Artifact, rather than captured stdout or the ownership marker, is the single source of truth for subsequent readings and validation.
 - A yielded execution handle means the Retrieval Owner is still active. The caller resumes that exact handle until an exit status is available and only performs bounded recovery after the original process is confirmed stopped.
+- A failed Search Attempt cannot contain a successful request. Non-deadline terminal failures must match the final failed request exactly; a deadline may terminate before any HTTP request or after an earlier failed request while waiting for bounded recovery.
 
 ## Testing Decisions
 
@@ -96,14 +105,18 @@ Research Evidence from arXiv is the product's core evidence. One fresh Retrieval
 - Given thin initial coverage, the Research Run test must observe at most one mechanism-specific expansion and a truthful Thin Coverage result when sparse evidence remains usable.
 - Given no retrievable evidence or exhausted bounded recovery, the Research Run test must observe an incomplete result rather than fabricated Papers or a Recommended Path.
 - Given malformed Atom entries, throttling, timeout, retry exhaustion, or an excessive `Retry-After`, tests must observe a structured request chain, deadline-bounded recovery, source-wide termination after the first exhausted Search Attempt, and no semantic expansion of an outage.
+- Given a retained-Paper cap reached before a duplicate appears in another category, tests must still observe the newest retrieved version and merged categories for that selected Paper.
 - Given successful requests with zero results, tests must observe `empty`; given failed retrieval with zero results, tests must observe `unavailable`.
 - Given citations that reference unknown Paper identities, validation must reject the Evidence Chain without inventing metadata.
 - Given more than twelve abstract readings or more than three full-text readings under the default budget, validation must reject the run unless an explicit caller budget override is recorded.
 - Given two readings that share sibling Paper content, the Skill's conformance evaluation must treat isolation as broken and require a bounded re-read or an incomplete result.
+- Given persistent contamination after bounded clean recovery, validation must accept one Reading Failure as the Paper's sole disposition only when the result is Incomplete with `isolation-broken` and an actionable re-entry condition.
 - Given a delayed collection, the CLI test must observe an ownership marker and no final Evidence Artifact before completion, then exactly one complete JSON artifact after completion. Invocation without a fresh `--output` path must fail before retrieval.
 - Given a second command using an active or completed Evidence Artifact path, the CLI test must reject it before another collection starts or existing evidence is overwritten.
 - Given a complete Research Run, conformance evaluation must observe exactly one Recommended Path, visible Alternate Paths where applicable, Prior-Art Pitfalls, Evidence Depth, Evidence Coverage, and Open Threads. Given an incomplete run, validation must observe one Incomplete Reason and no Recommended Path.
 - Given an explicit invocation, conformance evaluation must observe that the run starts. Given an implicit trivial or already-converged task, it must observe that the Skill stays out of the way.
+- The Skill contract gate must check each ordered journey step independently: explicit and implicit entry, caller budget propagation, evidence routing, three-way Paper disposition, complete/thin reporting, and incomplete reason plus re-entry.
+- A fresh isolated Agent forward evaluation must exercise explicit entry, trivial implicit non-entry, and persistent sibling-reading contamination. Its receipt is evidence rather than behavior authority and is bound to the exact `SKILL.md` SHA-256, so any Skill change requires a new evaluation.
 - The package contract test must verify that no Claude SDK, internal LLM runtime, provider credential, or model flag remains in production dependencies or public usage.
 - The installation test must verify that the complete Skill bundle, including referenced material, reaches the selected destination.
 - On a compatible Node version, the installation test must exercise the standard global install, update, canonical Skill, Claude Code symlink, helper execution, lock cleanup, and removal while preserving an unrelated Skill.

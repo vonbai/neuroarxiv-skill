@@ -163,7 +163,13 @@ test("Research Run treats an explicit small Paper budget as satisfied before exp
   const gateway: ArxivGateway = {
     async search(input) {
       calls.push(input);
-      return succeeded([paper("2601.00001", "2601.00001v1", input.category)]);
+      return succeeded([
+        paper(
+          "2601.00001",
+          input.category === "cs.DB" ? "2601.00001v1" : "2601.00001v2",
+          input.category,
+        ),
+      ]);
     },
   };
 
@@ -173,7 +179,8 @@ test("Research Run treats an explicit small Paper budget as satisfied before exp
 
   assert.equal(calls.length, 2);
   assert.equal(result.attempts.some((attempt) => attempt.phase === "expansion"), false);
-  assert.deepEqual(result.papers.map((item) => item.id), ["2601.00001"]);
+  assert.equal(result.papers[0].version, "2601.00001v2");
+  assert.deepEqual(result.papers[0].categories, ["cs.DB", "cs.DC"]);
   assert.deepEqual(result.termination, { reason: "initial-budget-satisfied" });
 });
 
@@ -236,6 +243,34 @@ test("Research Run stops the source after one exhausted query and never expands 
     category: "cs.SE",
   });
   assert.deepEqual(result.coverage, { status: "unavailable" });
+});
+
+test("Research Run stops the source after one malformed Atom response", async () => {
+  let requests = 0;
+  const gateway = createArxivGateway({
+    requestDelayMs: 0,
+    sleep: async () => undefined,
+    fetch: async () => {
+      requests += 1;
+      return new Response("<feed><entry><title>Ghost Paper</title></entry></feed>", {
+        status: 200,
+      });
+    },
+  });
+
+  const result = await createResearchEvidenceCollector(gateway)(request());
+
+  assert.equal(requests, 1);
+  assert.equal(result.attempts.length, 1);
+  assert.equal(result.attempts[0].status, "failed");
+  if (result.attempts[0].status === "failed") {
+    assert.equal(result.attempts[0].failure.kind, "invalid-response");
+  }
+  assert.deepEqual(result.termination, {
+    reason: "retrieval-failed",
+    phase: "initial",
+    category: "cs.DB",
+  });
 });
 
 test("Research Run preserves earlier Papers when a later Search Attempt stops the source", async () => {
@@ -339,6 +374,7 @@ async function completeArtifact(): Promise<ResearchRunArtifact> {
       },
     ],
     excludedPapers: [],
+    readingFailures: [],
     angles: [
       { label: "bounded leases", paperVersions: ["2601.00001v2", "2601.00003v1"] },
       { label: "causal versions", paperVersions: ["2601.00002v1"] },
@@ -372,12 +408,32 @@ test("Research Run validation rejects unknown citations without synthesizing met
   assert.ok(validation.errors.some((error) => error.includes("unknown Paper version 9999.99999v1")));
 });
 
-test("Research Run validation rejects a path when isolation remains broken", async () => {
+test("Research Run validation accepts an honest isolation-broken terminal disposition", async () => {
   const artifact = await completeArtifact();
-  artifact.findings[0].isolationStatus = "broken";
+  const failedVersion = artifact.findings[0].paperVersion;
+  artifact.status = "incomplete";
+  artifact.incompleteReason = {
+    kind: "isolation-broken",
+    detail: "One clean re-read remained contaminated by sibling Paper context.",
+    reentryCondition: "A fresh isolated reading context becomes available.",
+  };
+  artifact.findings = artifact.findings.slice(1);
+  artifact.angles = [];
+  artifact.recommendedPath = null;
+  artifact.alternates = [];
+  artifact.pitfalls = [];
+  Object.assign(artifact, {
+    readingFailures: [
+      {
+        paperVersion: failedVersion,
+        kind: "isolation-broken",
+        detail: "The bounded clean re-read still observed sibling Paper content.",
+      },
+    ],
+  });
+
   const validation = validateResearchRun(artifact);
-  assert.equal(validation.valid, false);
-  assert.ok(validation.errors.some((error) => error.includes("broken isolation")));
+  assert.deepEqual(validation, { valid: true, errors: [] });
 });
 
 test("Research Run validation forbids a recommendation on an incomplete run", async () => {
@@ -386,6 +442,7 @@ test("Research Run validation forbids a recommendation on an incomplete run", as
   artifact.incompleteReason = {
     kind: "evidence-chain-broken",
     detail: "Fixture path is intentionally invalid.",
+    reentryCondition: "The load-bearing evidence chain can be reconstructed.",
   };
   const validation = validateResearchRun(artifact);
   assert.equal(validation.valid, false);
@@ -416,6 +473,7 @@ test("Research Run validation accepts a traceable unavailable terminal outcome",
     incompleteReason: {
       kind: "research-evidence-unavailable",
       detail: "The first Search Attempt exhausted transport recovery.",
+      reentryCondition: "arXiv access is restored for a future open decision.",
     },
     researchEvidence,
     findings: [],
@@ -427,6 +485,56 @@ test("Research Run validation accepts a traceable unavailable terminal outcome",
   } satisfies Partial<ResearchRunArtifact>);
 
   assert.deepEqual(validateResearchRun(artifact), { valid: true, errors: [] });
+});
+
+test("Research Run validation accepts a successful empty Search Plan with one re-entry condition", async () => {
+  const artifact = await completeArtifact();
+  const researchEvidence = await createResearchEvidenceCollector({
+    async search() {
+      return succeeded([]);
+    },
+  })(
+    request({
+      searchPlan: {
+        categories: [{ id: "cs.SE", why: "software evolution" }],
+        terms: ["traceability recovery"],
+      },
+    }),
+  );
+  Object.assign(artifact, {
+    status: "incomplete",
+    incompleteReason: {
+      kind: "research-evidence-empty",
+      detail: "The complete Search Plan returned no Papers.",
+      reentryCondition: "A materially narrower mechanism or new terminology becomes relevant.",
+    },
+    researchEvidence,
+    findings: [],
+    excludedPapers: [],
+    readingFailures: [],
+    angles: [],
+    recommendedPath: null,
+    alternates: [],
+    pitfalls: [],
+  } satisfies Partial<ResearchRunArtifact>);
+
+  assert.deepEqual(validateResearchRun(artifact), { valid: true, errors: [] });
+});
+
+test("Research Run validation requires an actionable re-entry condition", async () => {
+  const artifact = await completeArtifact();
+  artifact.status = "incomplete";
+  artifact.recommendedPath = null;
+  artifact.incompleteReason = {
+    kind: "evidence-chain-broken",
+    detail: "The primary mechanism citation no longer supports the decision.",
+    reentryCondition: "",
+  };
+
+  const validation = validateResearchRun(artifact);
+
+  assert.equal(validation.valid, false);
+  assert.ok(validation.errors.includes("incompleteReason.reentryCondition must not be empty"));
 });
 
 test("Research Run validation rejects an empty Search Plan mislabeled as unavailable", async () => {
@@ -448,6 +556,7 @@ test("Research Run validation rejects an empty Search Plan mislabeled as unavail
     incompleteReason: {
       kind: "research-evidence-unavailable",
       detail: "Incorrect fixture classification.",
+      reentryCondition: "The fixture classification is corrected.",
     },
     researchEvidence,
     findings: [],
@@ -471,6 +580,7 @@ test("Research Run validation rejects an unavailable reason attached to usable e
   artifact.incompleteReason = {
     kind: "research-evidence-unavailable",
     detail: "Incorrect fixture classification.",
+    reentryCondition: "The fixture classification is corrected.",
   };
 
   const validation = validateResearchRun(artifact);
@@ -481,6 +591,135 @@ test("Research Run validation rejects an unavailable reason attached to usable e
       error.includes("research-evidence-unavailable requires unavailable"),
     ),
   );
+});
+
+test("Research Run validation rejects malformed Paper metadata even when references agree", async () => {
+  const artifact = await completeArtifact();
+  artifact.researchEvidence.papers[0].summary = "";
+
+  const validation = validateResearchRun(artifact);
+
+  assert.equal(validation.valid, false);
+  assert.ok(validation.errors.includes("researchEvidence.papers[0].summary must not be empty"));
+});
+
+test("Research Run validation rejects a Paper whose canonical URL contradicts its version", async () => {
+  const artifact = await completeArtifact();
+  artifact.researchEvidence.papers[0].absUrl = "https://arxiv.org/abs/2601.99999v1";
+
+  const validation = validateResearchRun(artifact);
+
+  assert.equal(validation.valid, false);
+  assert.ok(
+    validation.errors.includes(
+      "researchEvidence.papers[0].absUrl must match its exact Paper version",
+    ),
+  );
+});
+
+test("Research Run validation rejects a failed Search Attempt ending in a successful request", async () => {
+  const artifact = await completeArtifact();
+  const researchEvidence = await createResearchEvidenceCollector({
+    async search() {
+      return failed("network unreachable");
+    },
+  })(request());
+  const failedAttempt = researchEvidence.attempts[0];
+  if (failedAttempt.status !== "failed") throw new Error("fixture must fail");
+  failedAttempt.requests = [{ sequence: 1, status: "succeeded" }];
+  Object.assign(artifact, {
+    status: "incomplete",
+    incompleteReason: {
+      kind: "research-evidence-unavailable",
+      detail: "The first Search Attempt exhausted transport recovery.",
+      reentryCondition: "arXiv access is restored for a future open decision.",
+    },
+    researchEvidence,
+    findings: [],
+    excludedPapers: [],
+    angles: [],
+    recommendedPath: null,
+    alternates: [],
+    pitfalls: [],
+  } satisfies Partial<ResearchRunArtifact>);
+
+  const validation = validateResearchRun(artifact);
+
+  assert.equal(validation.valid, false);
+  assert.ok(validation.errors.some((error) => error.includes("failed with a successful request")));
+});
+
+test("Research Run validation rejects a terminal failure that contradicts its request chain", async () => {
+  const artifact = await completeArtifact();
+  const researchEvidence = await createResearchEvidenceCollector({
+    async search() {
+      return failed("network unreachable");
+    },
+  })(request());
+  const failedAttempt = researchEvidence.attempts[0];
+  if (failedAttempt.status !== "failed") throw new Error("fixture must fail");
+  const terminalRequest = failedAttempt.requests.at(-1);
+  if (!terminalRequest || terminalRequest.status !== "failed") {
+    throw new Error("fixture must end with a failed request");
+  }
+  terminalRequest.failure = {
+    kind: "transport",
+    message: "different terminal failure",
+    retryable: true,
+  };
+  Object.assign(artifact, {
+    status: "incomplete",
+    incompleteReason: {
+      kind: "research-evidence-unavailable",
+      detail: "The first Search Attempt exhausted transport recovery.",
+      reentryCondition: "arXiv access is restored for a future open decision.",
+    },
+    researchEvidence,
+    findings: [],
+    excludedPapers: [],
+    readingFailures: [],
+    angles: [],
+    recommendedPath: null,
+    alternates: [],
+    pitfalls: [],
+  } satisfies Partial<ResearchRunArtifact>);
+
+  const validation = validateResearchRun(artifact);
+
+  assert.equal(validation.valid, false);
+  assert.ok(validation.errors.some((error) => error.includes("terminal failure does not match")));
+});
+
+test("Research Run validation accepts a deadline before any HTTP request", async () => {
+  const artifact = await completeArtifact();
+  const failure = {
+    kind: "deadline-exhausted" as const,
+    message: "Research Evidence retrieval deadline exhausted",
+    retryable: false,
+  };
+  const researchEvidence = await createResearchEvidenceCollector({
+    async search() {
+      return { status: "failed" as const, failure, requests: [] };
+    },
+  })(request());
+  Object.assign(artifact, {
+    status: "incomplete",
+    incompleteReason: {
+      kind: "research-evidence-unavailable",
+      detail: "The retrieval deadline expired before a request could start.",
+      reentryCondition: "A future open decision has a fresh retrieval window.",
+    },
+    researchEvidence,
+    findings: [],
+    excludedPapers: [],
+    readingFailures: [],
+    angles: [],
+    recommendedPath: null,
+    alternates: [],
+    pitfalls: [],
+  } satisfies Partial<ResearchRunArtifact>);
+
+  assert.deepEqual(validateResearchRun(artifact), { valid: true, errors: [] });
 });
 
 test("Research Run validation rejects Thin Coverage presented as Complete", async () => {
@@ -504,7 +743,9 @@ test("Research Run validation requires every retained Paper to be accounted for"
 
   assert.equal(validation.valid, false);
   assert.ok(
-    validation.errors.some((error) => error.includes("2601.00003v1 has no finding or exclusion")),
+    validation.errors.some((error) =>
+      error.includes("2601.00003v1 has no finding, exclusion, or reading failure"),
+    ),
   );
 });
 
@@ -533,6 +774,46 @@ test("Research Run validation reports a missing exclusions collection", async ()
 
   assert.equal(validation.valid, false);
   assert.ok(validation.errors.includes("excludedPapers must be an array"));
+});
+
+test("Research Run validation requires the Reading Failure collection", async () => {
+  const artifact = await completeArtifact();
+  delete (artifact as Partial<ResearchRunArtifact>).readingFailures;
+
+  const validation = validateResearchRun(artifact);
+
+  assert.equal(validation.valid, false);
+  assert.ok(validation.errors.includes("readingFailures must be an array"));
+});
+
+test("Research Run validation rejects a Reading Failure under the wrong incomplete reason", async () => {
+  const artifact = await completeArtifact();
+  const failedVersion = artifact.findings[0].paperVersion;
+  artifact.status = "incomplete";
+  artifact.incompleteReason = {
+    kind: "evidence-chain-broken",
+    detail: "The evidence chain is incomplete.",
+    reentryCondition: "The evidence chain can be reconstructed.",
+  };
+  artifact.findings = artifact.findings.slice(1);
+  artifact.readingFailures = [
+    {
+      paperVersion: failedVersion,
+      kind: "isolation-broken",
+      detail: "The bounded clean re-read still observed sibling Paper content.",
+    },
+  ];
+  artifact.angles = [];
+  artifact.recommendedPath = null;
+  artifact.alternates = [];
+  artifact.pitfalls = [];
+
+  const validation = validateResearchRun(artifact);
+
+  assert.equal(validation.valid, false);
+  assert.ok(
+    validation.errors.includes("Reading Failures require an incomplete isolation-broken outcome"),
+  );
 });
 
 test("Research Run validation accepts traceable Documentation Evidence", async () => {

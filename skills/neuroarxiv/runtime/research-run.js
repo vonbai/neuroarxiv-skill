@@ -42,15 +42,18 @@ function normalizeCategories(categories) {
 function mergeBatches(batches, maxPapers) {
     const byId = new Map();
     const maxBatchSize = Math.max(0, ...batches.map((batch) => batch.length));
-    for (let rank = 0; rank < maxBatchSize && byId.size < maxPapers; rank += 1) {
+    for (let rank = 0; rank < maxBatchSize; rank += 1) {
         for (const batch of batches) {
             const paper = batch[rank];
             if (!paper)
                 continue;
             const existing = byId.get(paper.id);
-            byId.set(paper.id, existing ? mergePaper(existing, paper) : paper);
-            if (byId.size >= maxPapers)
-                break;
+            if (existing) {
+                byId.set(paper.id, mergePaper(existing, paper));
+            }
+            else if (byId.size < maxPapers) {
+                byId.set(paper.id, paper);
+            }
         }
     }
     return [...byId.values()];
@@ -179,9 +182,6 @@ function validateFinding(finding, index, paperVersions, errors) {
     if (!paperVersions.has(finding.paperVersion)) {
         errors.push(`${path} references unknown Paper version ${finding.paperVersion}`);
     }
-    if (finding.isolationStatus === "broken") {
-        errors.push(`${path} has broken isolation`);
-    }
     requireText(finding.approach, `${path}.approach`, errors);
     requireText(finding.borrow, `${path}.borrow`, errors);
     requireText(finding.limitation, `${path}.limitation`, errors);
@@ -254,6 +254,13 @@ function validateRetrievalFailureShape(value, path, errors) {
         expectInteger(failure.retryAfterMs, `${path}.retryAfterMs`, errors, 0);
     }
 }
+function sameRetrievalFailure(left, right) {
+    return (left.kind === right.kind &&
+        left.message === right.message &&
+        left.retryable === right.retryable &&
+        left.httpStatus === right.httpStatus &&
+        left.retryAfterMs === right.retryAfterMs);
+}
 function validateResearchRunShape(input, errors) {
     const run = expectObject(input, "Research Run", errors);
     if (!run)
@@ -271,6 +278,7 @@ function validateResearchRunShape(input, errors) {
                 "validation-failed",
             ], "incompleteReason.kind", errors);
             expectString(reason.detail, "incompleteReason.detail", errors);
+            expectString(reason.reentryCondition, "incompleteReason.reentryCondition", errors);
         }
     }
     const evidence = expectObject(run.researchEvidence, "researchEvidence", errors);
@@ -310,10 +318,18 @@ function validateResearchRunShape(input, errors) {
                 "absUrl",
                 "pdfUrl",
             ]) {
-                expectString(paper[field], `researchEvidence.papers[${index}].${field}`, errors);
+                requireText(paper[field], `researchEvidence.papers[${index}].${field}`, errors);
             }
-            expectStringArray(paper.authors, `researchEvidence.papers[${index}].authors`, errors);
-            expectStringArray(paper.categories, `researchEvidence.papers[${index}].categories`, errors);
+            const authors = expectArray(paper.authors, `researchEvidence.papers[${index}].authors`, errors);
+            if (authors?.length === 0) {
+                errors.push(`researchEvidence.papers[${index}].authors must not be empty`);
+            }
+            authors?.forEach((author, authorIndex) => requireText(author, `researchEvidence.papers[${index}].authors[${authorIndex}]`, errors));
+            const paperCategories = expectArray(paper.categories, `researchEvidence.papers[${index}].categories`, errors);
+            if (paperCategories?.length === 0) {
+                errors.push(`researchEvidence.papers[${index}].categories must not be empty`);
+            }
+            paperCategories?.forEach((category, categoryIndex) => requireText(category, `researchEvidence.papers[${index}].categories[${categoryIndex}]`, errors));
         });
         const attempts = expectArray(evidence.attempts, "researchEvidence.attempts", errors);
         attempts?.forEach((item, index) => {
@@ -361,7 +377,7 @@ function validateResearchRunShape(input, errors) {
             return;
         expectString(finding.paperVersion, `findings[${index}].paperVersion`, errors);
         expectEnum(finding.evidenceDepth, ["abstract", "full-text"], `findings[${index}].evidenceDepth`, errors);
-        expectEnum(finding.isolationStatus, ["isolated", "recovered", "broken"], `findings[${index}].isolationStatus`, errors);
+        expectEnum(finding.isolationStatus, ["isolated", "recovered"], `findings[${index}].isolationStatus`, errors);
         for (const field of ["approach", "borrow", "limitation", "relevanceNote"]) {
             expectString(finding[field], `findings[${index}].${field}`, errors);
         }
@@ -373,6 +389,15 @@ function validateResearchRunShape(input, errors) {
             expectString(exclusion.paperVersion, `excludedPapers[${index}].paperVersion`, errors);
             expectString(exclusion.reason, `excludedPapers[${index}].reason`, errors);
         }
+    });
+    const readingFailures = expectArray(run.readingFailures, "readingFailures", errors);
+    readingFailures?.forEach((item, index) => {
+        const failure = expectObject(item, `readingFailures[${index}]`, errors);
+        if (!failure)
+            return;
+        expectString(failure.paperVersion, `readingFailures[${index}].paperVersion`, errors);
+        expectEnum(failure.kind, ["isolation-broken"], `readingFailures[${index}].kind`, errors);
+        expectString(failure.detail, `readingFailures[${index}].detail`, errors);
     });
     const angles = expectArray(run.angles, "angles", errors);
     angles?.forEach((item, index) => {
@@ -447,6 +472,22 @@ export function validateResearchRun(input) {
     if (run.researchEvidence.papers.length > run.researchEvidence.budget.maxPapers) {
         errors.push("researchEvidence exceeds its recorded Paper budget");
     }
+    run.researchEvidence.papers.forEach((paper, index) => {
+        const path = `researchEvidence.papers[${index}]`;
+        if (paper.version.replace(/v\d+$/, "") !== paper.id || !/v\d+$/.test(paper.version)) {
+            errors.push(`${path}.version must be a versioned form of its bare id`);
+        }
+        if (Number.isNaN(Date.parse(paper.published)))
+            errors.push(`${path}.published must be an ISO date`);
+        if (Number.isNaN(Date.parse(paper.updated)))
+            errors.push(`${path}.updated must be an ISO date`);
+        if (paper.absUrl !== `https://arxiv.org/abs/${paper.version}`) {
+            errors.push(`${path}.absUrl must match its exact Paper version`);
+        }
+        if (paper.pdfUrl !== `https://arxiv.org/pdf/${paper.version}`) {
+            errors.push(`${path}.pdfUrl must match its exact Paper version`);
+        }
+    });
     const expansionAttempts = run.researchEvidence.attempts.filter((attempt) => attempt.phase === "expansion");
     const coverage = run.researchEvidence.coverage.status;
     const paperCount = run.researchEvidence.papers.length;
@@ -490,7 +531,10 @@ export function validateResearchRun(input) {
     run.researchEvidence.attempts.forEach((attempt, index) => {
         const lastRequest = attempt.requests.at(-1);
         if (attempt.status === "succeeded") {
-            if (!lastRequest || lastRequest.status !== "succeeded") {
+            const successfulRequests = attempt.requests.filter((request) => request.status === "succeeded");
+            if (!lastRequest ||
+                lastRequest.status !== "succeeded" ||
+                successfulRequests.length !== 1) {
                 errors.push(`researchEvidence.attempts[${index}] succeeded without a successful request`);
             }
         }
@@ -500,6 +544,17 @@ export function validateResearchRun(input) {
             }
             if (!attempt.failure) {
                 errors.push(`researchEvidence.attempts[${index}] failed without a terminal failure`);
+            }
+            if (attempt.requests.some((request) => request.status === "succeeded")) {
+                errors.push(`researchEvidence.attempts[${index}] failed with a successful request`);
+            }
+            if (attempt.failure.kind !== "deadline-exhausted") {
+                if (!lastRequest || lastRequest.status !== "failed") {
+                    errors.push(`researchEvidence.attempts[${index}] failed without a failed request`);
+                }
+                else if (!sameRetrievalFailure(attempt.failure, lastRequest.failure)) {
+                    errors.push(`researchEvidence.attempts[${index}] terminal failure does not match its request chain`);
+                }
             }
         }
     });
@@ -583,9 +638,26 @@ export function validateResearchRun(input) {
         requireText(excluded.reason, `${path}.reason`, errors);
         excludedVersions.add(excluded.paperVersion);
     });
+    const readingFailureVersions = new Set();
+    run.readingFailures.forEach((failure, index) => {
+        const path = `readingFailures[${index}]`;
+        if (!paperVersions.has(failure.paperVersion)) {
+            errors.push(`${path} references unknown Paper version ${failure.paperVersion}`);
+        }
+        if (findingVersions.has(failure.paperVersion) || excludedVersions.has(failure.paperVersion)) {
+            errors.push(`${path} must be the Paper's only reading disposition`);
+        }
+        if (readingFailureVersions.has(failure.paperVersion)) {
+            errors.push(`readingFailures contains duplicate Paper version ${failure.paperVersion}`);
+        }
+        requireText(failure.detail, `${path}.detail`, errors);
+        readingFailureVersions.add(failure.paperVersion);
+    });
     for (const version of paperVersions) {
-        if (!findingVersions.has(version) && !excludedVersions.has(version)) {
-            errors.push(`Paper ${version} has no finding or exclusion`);
+        if (!findingVersions.has(version) &&
+            !excludedVersions.has(version) &&
+            !readingFailureVersions.has(version)) {
+            errors.push(`Paper ${version} has no finding, exclusion, or reading failure`);
         }
     }
     const fullTextCount = run.findings.filter((finding) => finding.evidenceDepth === "full-text").length;
@@ -608,6 +680,7 @@ export function validateResearchRun(input) {
         }
         else {
             requireText(run.incompleteReason.detail, "incompleteReason.detail", errors);
+            requireText(run.incompleteReason.reentryCondition, "incompleteReason.reentryCondition", errors);
         }
     }
     else if (run.recommendedPath === null) {
@@ -632,7 +705,15 @@ export function validateResearchRun(input) {
     if (run.incompleteReason?.kind === "research-evidence-empty" && coverage !== "empty") {
         errors.push("research-evidence-empty requires empty Research Evidence");
     }
-    const usableFindingCount = run.findings.filter((finding) => paperVersions.has(finding.paperVersion) && finding.isolationStatus !== "broken").length;
+    if (readingFailureVersions.size > 0 &&
+        (run.status !== "incomplete" || run.incompleteReason?.kind !== "isolation-broken")) {
+        errors.push("Reading Failures require an incomplete isolation-broken outcome");
+    }
+    if (run.incompleteReason?.kind === "isolation-broken" &&
+        readingFailureVersions.size === 0) {
+        errors.push("isolation-broken requires at least one Reading Failure");
+    }
+    const usableFindingCount = run.findings.filter((finding) => paperVersions.has(finding.paperVersion)).length;
     if (run.status === "complete" &&
         (coverage !== "ready" || usableFindingCount < READY_PAPER_COUNT)) {
         errors.push(`Complete Research Run requires ready Research Evidence and at least ${READY_PAPER_COUNT} usable findings`);

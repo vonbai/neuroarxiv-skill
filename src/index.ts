@@ -22,6 +22,7 @@ export type {
   DocumentationEvidenceCitation,
   EvidenceCitation,
   ExcludedPaper,
+  ReadingFailure,
   RecommendedPath,
   AlternatePath,
   PriorArtPitfall,

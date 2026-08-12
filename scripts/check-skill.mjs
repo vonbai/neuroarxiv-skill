@@ -13,6 +13,15 @@ function requireCondition(condition, message) {
   if (!condition) errors.push(message);
 }
 
+function numberedStep(number) {
+  const match = new RegExp(`^## ${number}\\.[^\\n]*\\n`, "m").exec(skill);
+  requireCondition(Boolean(match), `SKILL.md is missing ordered journey step ${number}`);
+  if (!match) return "";
+  const remainder = skill.slice(match.index + match[0].length);
+  const nextHeading = remainder.search(/^## \d+\./m);
+  return nextHeading === -1 ? remainder : remainder.slice(0, nextHeading);
+}
+
 const skill = readFileSync(skillPath, "utf8");
 const frontmatter = skill.match(/^---\n([\s\S]*?)\n---\n/);
 requireCondition(Boolean(frontmatter), "SKILL.md must have YAML frontmatter");
@@ -39,6 +48,61 @@ requireCondition(
     skill.includes('research-evidence-unavailable') &&
     !skill.includes("--json"),
   "Skill must preserve the single-owner Evidence Artifact journey",
+);
+
+const eligibilityStep = numberedStep(1);
+requireCondition(
+  /Proceed immediately when the user explicitly invokes/.test(eligibilityStep) &&
+    /only when all three conditions hold/.test(eligibilityStep) &&
+    /Otherwise continue the user's task without starting/.test(eligibilityStep),
+  "Research Eligibility must preserve explicit entry and bounded implicit entry",
+);
+
+const framingStep = numberedStep(2);
+const collectionStep = numberedStep(4);
+requireCondition(
+  /Apply an explicit caller override as written/.test(framingStep) &&
+    collectionStep.includes("--max-papers <count>") &&
+    collectionStep.includes("--max-full-text-papers <count>"),
+  "the journey must propagate every explicit Paper budget",
+);
+requireCondition(
+  /`ready` or `thin`: continue/.test(collectionStep) &&
+    /`empty`: stop with/.test(collectionStep) &&
+    /`unavailable`: stop with/.test(collectionStep) &&
+    /never rerun\s+an Evidence Artifact whose coverage is `unavailable`/.test(collectionStep),
+  "the journey must route every Research Evidence coverage state",
+);
+
+const readingStep = numberedStep(5);
+requireCondition(
+  readingStep.includes('"isolationStatus": "isolated"') &&
+    readingStep.includes('`isolationStatus: "recovered"`') &&
+    readingStep.includes("`readingFailures`") &&
+    readingStep.includes('"kind": "isolation-broken"') &&
+    /exactly one trustworthy\s+Finding, reasoned Exclusion, or traceable Reading Failure/.test(
+      readingStep,
+    ),
+  "the journey must close every isolated-reading disposition",
+);
+
+const reportStep = numberedStep(8);
+requireCondition(
+  /For Complete or Thin Coverage/.test(reportStep) &&
+    /For an Incomplete Research Run/.test(reportStep) &&
+    reportStep.includes("incompleteReason.reentryCondition") &&
+    /Omit empty recommendation, angle, alternate, and pitfall sections/.test(reportStep),
+  "the journey must close complete, thin, and incomplete reporting",
+);
+
+const artifactReference = readFileSync(
+  join(skillDir, "references", "research-run-artifact.md"),
+  "utf8",
+);
+requireCondition(
+  artifactReference.includes('"readingFailures"') &&
+    artifactReference.includes('"reentryCondition"'),
+  "the Artifact contract must own Reading Failures and re-entry",
 );
 for (const file of [...RUNTIME_FILES, "package.json"]) {
   requireCondition(existsSync(join(skillDir, "runtime", file)), `missing Skill runtime file: ${file}`);
@@ -91,4 +155,4 @@ if (errors.length > 0) {
   for (const error of errors) process.stderr.write(`- ${error}\n`);
   process.exit(1);
 }
-process.stdout.write("Skill structure and package contract are valid.\n");
+process.stdout.write("Skill structure, journey conformance, and package contract are valid.\n");

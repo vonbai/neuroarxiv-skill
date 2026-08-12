@@ -88,7 +88,7 @@ last two distinguish a successful zero-match Search Plan from a failed source.
 The Research Run ends as `Complete`, `Thin Coverage`, or
 `Incomplete Research Run`. It never pads a weak result set or invents a
 citation to force a recommendation, and every incomplete outcome names one
-explicit reason.
+explicit reason and re-entry condition.
 
 ## Deterministic adapter
 
@@ -113,10 +113,12 @@ reports liveness on stderr, and atomically publishes one complete JSON Evidence
 Artifact. Resume the same process when an execution tool yields and read the file
 only after exit status 0.
 
-Inside that narrow interface, the Research Run serializes every request, retains
-the complete retry chain, enforces one wall-clock deadline, and stops the source
-after one Search Attempt exhausts recovery. Expansion is used only for semantic
-recall after the entire initial phase succeeds with thin coverage.
+Inside that narrow interface, the Research Run validates complete Paper identity,
+serializes every request, retains the complete retry chain, reconciles selected
+Paper versions even after the retention cap, enforces one wall-clock deadline,
+and stops the source after one Search Attempt exhausts recovery. Expansion is
+used only for semantic recall after the entire initial phase succeeds with thin
+coverage.
 
 ## Architecture
 
@@ -144,7 +146,7 @@ The public package interface is intentionally narrow:
 
 - `collectResearchEvidence` collects deterministic arXiv evidence.
 - `validateResearchRun` checks budgets, isolation declarations, Paper identity,
-  Paper accounting, Retrieval Termination, explicit incomplete outcomes, and
+  three-way Paper disposition, Retrieval Termination, explicit incomplete outcomes, and
   typed Evidence Chains without making semantic judgments.
 
 The domain glossary and architecture decisions live in
@@ -160,18 +162,21 @@ npm pack --dry-run
 ```
 
 `npm run check` covers types, fixture-driven Research Run behavior, clean build,
-the generated runtime projection, Skill structure, and an isolated standard
-global install/update/symlink/helper/uninstall lifecycle. Nodes older than 22.20
-still verify the self-contained Skill bundle but skip the external installer
-lifecycle.
+the generated runtime projection, Skill structure, a snapshot-bound Agent
+journey forward evaluation, and an isolated standard global
+install/update/symlink/helper/uninstall lifecycle. The forward-evaluation receipt
+is bound to the exact `SKILL.md` SHA-256, so a Skill change requires fresh
+explicit-entry, trivial non-entry, and persistent-contamination observations.
+Nodes older than 22.20 still verify the self-contained Skill bundle but skip the
+external installer lifecycle.
 
 ## Evaluation provenance
 
 [`EVALS.md`](./EVALS.md) and
 [`bench/deep-tech-eval-transcripts.md`](./bench/deep-tech-eval-transcripts.md)
 are retained as historical upstream evaluation evidence. They measured the
-former v0.1 workflow and are not presented as a validation of this revised v0.3
-implementation.
+former v0.1 workflow and are not presented as validation of the current
+Skill-first implementation.
 
 ## License
 

@@ -34,7 +34,7 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-test("search CLI preserves category reasons and explicit full-text budget", () => {
+test("search CLI preserves category reasons and every explicit Paper budget", () => {
   const flags = parseSearch([
     "Suppress duplicate execution after retries",
     "--categories",
@@ -43,6 +43,8 @@ test("search CLI preserves category reasons and explicit full-text budget", () =
     "retry suppression,idempotent execution",
     "--max-full-text-papers",
     "5",
+    "--max-papers",
+    "7",
     "--output",
     "/tmp/neuroarxiv-search-flags.json",
   ]);
@@ -52,6 +54,40 @@ test("search CLI preserves category reasons and explicit full-text budget", () =
     { id: "cs.DB", why: "durable deduplication" },
   ]);
   assert.equal(flags?.maxFullTextPapers, 5);
+  assert.equal(flags?.maxPapers, 7);
+});
+
+test("search CLI passes every explicit Paper budget through the Research Run seam", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "neuroarxiv-search-budget-"));
+  const output = join(directory, "research-evidence.json");
+  let observedRequest: Parameters<NonNullable<Parameters<typeof createSearchCommand>[0]["collect"]>>[0] | undefined;
+  const command = createSearchCommand({
+    collect: async (request) => {
+      observedRequest = request;
+      return EVIDENCE;
+    },
+    stderr: () => undefined,
+  });
+
+  try {
+    await command([
+      EVIDENCE.problem,
+      "--categories",
+      "cs.DC=distributed coordination",
+      "--terms",
+      "retry suppression",
+      "--max-papers",
+      "7",
+      "--max-full-text-papers",
+      "5",
+      "--output",
+      output,
+    ]);
+
+    assert.deepEqual(observedRequest?.budget, { maxPapers: 7, maxFullTextPapers: 5 });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("search CLI accepts plain category ids", () => {

@@ -71,10 +71,11 @@ node scripts/search.mjs "<build problem>" \
   --output "$evidence_file"
 ```
 
-Omit `--expand-terms` when no honest expansion exists. Add `--since-years 0`
-only when older work is relevant; otherwise use the eight-year default. When the
-caller explicitly overrides the full-text budget, pass
-`--max-full-text-papers <count>` so the emitted Research Evidence records it.
+Omit `--expand-terms` when no honest expansion exists or the caller disables
+expansion. Add `--since-years 0` only when older work is relevant; otherwise use the eight-year default. When the
+caller overrides a Paper budget, pass `--max-papers <count>` and/or
+`--max-full-text-papers <count>` so the emitted Research Evidence records every
+explicit override.
 
 Start this helper exactly once for the Research Run. It becomes the Retrieval
 Owner for the fresh Evidence Artifact path before contacting arXiv and reports
@@ -107,9 +108,11 @@ package once and rerun the same helper. Then branch on the Evidence Artifact:
 - `unavailable`: stop with `incompleteReason.kind: "research-evidence-unavailable"`.
 
 For either stop, set `recommendedPath: null`, keep the helper's Search Attempts
-and Retrieval Termination verbatim, validate the artifact, and report the
-Incomplete Reason. Treat `empty` as a Search Plan result and `unavailable` as a
-source failure; neither authorizes capability probing or an automatic rerun.
+and Retrieval Termination verbatim, and record one `incompleteReason` with the
+matching kind, a concrete `detail`, and an actionable `reentryCondition`. Then
+validate the artifact and report that Incomplete Reason. Treat `empty` as a
+Search Plan result and `unavailable` as a source failure; neither authorizes
+capability probing or an automatic rerun.
 
 **Completion criterion:** the one Retrieval Owner has exited and its complete
 Evidence Artifact is readable, with `ready`, `thin`, `empty`, or `unavailable`
@@ -130,6 +133,7 @@ sees or compares sibling Papers is invalid.
 {
   "paperVersion": "exact retrieved version",
   "evidenceDepth": "abstract",
+  "isolationStatus": "isolated",
   "approach": "core technical mechanism",
   "borrow": "one concrete implementable takeaway",
   "limitation": "load-bearing weakness or breaking condition",
@@ -137,16 +141,26 @@ sees or compares sibling Papers is invalid.
 }
 ```
 
-For each retained Paper that is irrelevant after isolated reading, record one
+For each retained Paper that is irrelevant after successful isolated reading, record one
 `excludedPapers` entry with its exact version and a concrete reason. A retained
-Paper must end in exactly one place: a Prior-Art Finding or `excludedPapers`.
+Paper must end in exactly one place: a Prior-Art Finding, `excludedPapers`, or
+`readingFailures`.
 
 Paraphrase. Support only claims present in the material actually read. Re-run one
-contaminated reading once in a clean context; persistent contamination makes the
-Research Run incomplete.
+contaminated reading once in a clean context. Mark a successful clean re-read as
+`isolationStatus: "recovered"`. If contamination persists, create neither a
+Finding nor an Exclusion; record this sole disposition and stop as Incomplete:
 
-**Completion criterion:** every retained Paper has one valid abstract-level
-Prior-Art Finding or is explicitly excluded as irrelevant.
+```json
+{
+  "paperVersion": "exact retrieved version",
+  "kind": "isolation-broken",
+  "detail": "concrete sibling-context contamination that persisted"
+}
+```
+
+**Completion criterion:** every retained Paper has exactly one trustworthy
+Finding, reasoned Exclusion, or traceable Reading Failure.
 
 ## 6. Deepen Load-Bearing Evidence
 
@@ -207,8 +221,9 @@ every reported structural error within the existing budget before reporting. For
 an Incomplete Research Run, set exactly one `incompleteReason` before validation.
 Use `validation-failed` when structural errors remain and preserve those errors in
 its detail; use the evidence, isolation, or Evidence Chain kind when that condition
-stopped the journey. Never erase broken isolation or an Evidence Chain to make
-validation pass.
+stopped the journey. Set its `reentryCondition` to the concrete change that would
+make another Research Run worthwhile. Never erase a Reading Failure or broken
+Evidence Chain to make validation pass.
 
 Reject unknown Paper ids, synthesized titles or URLs, sibling-aware readings,
 claims deeper than their Evidence Depth, and citations whose role is unsupported.
@@ -239,14 +254,13 @@ For Complete or Thin Coverage, continue with:
 For an Incomplete Research Run, finish instead with:
 
 5. **Incomplete Reason** — the one recorded kind and its concrete detail
-6. **Re-entry Condition** — the external change or narrower future decision that
-   would justify a new Research Run
+6. **Re-entry Condition** — copy `incompleteReason.reentryCondition` verbatim
 
 Omit empty recommendation, angle, alternate, and pitfall sections from an
 Incomplete report.
 
 Research Evidence coverage is `ready`, `thin`, `empty`, or `unavailable`.
-Documentation Evidence coverage is `used`, `not needed`, or `unavailable`, with
+Documentation Evidence coverage is `used`, `not-needed`, or `unavailable`, with
 a reason and version/source identity when used. Do not add another evidence role.
 
 **Completion criterion:** the user can start implementation from one path while

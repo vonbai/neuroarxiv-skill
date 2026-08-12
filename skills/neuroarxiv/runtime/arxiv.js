@@ -3,11 +3,17 @@ const DEFAULT_REQUEST_DELAY_MS = 3000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 const DEFAULT_RETRIEVAL_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_RETRIES = 1;
-const USER_AGENT = "neuroarxiv-skill/0.4.0 (+https://github.com/vonbai/neuroarxiv-skill)";
+const USER_AGENT = "neuroarxiv-skill/0.5.0 (+https://github.com/vonbai/neuroarxiv-skill)";
 class RetrievalDeadlineError extends Error {
     constructor() {
         super("Research Evidence retrieval deadline exhausted");
         this.name = "RetrievalDeadlineError";
+    }
+}
+class InvalidAtomResponseError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = "InvalidAtomResponseError";
     }
 }
 function defaultSleep(ms) {
@@ -32,29 +38,53 @@ function parseAttrs(tag) {
     }
     return attrs;
 }
-function extractLinks(block) {
-    return [...block.matchAll(/<link\b[^>]*\/?\s*>/g)].map((match) => parseAttrs(match[0]));
-}
 function extractCategories(block) {
     return [...block.matchAll(/<category\b[^>]*\/?\s*>/g)]
         .map((match) => parseAttrs(match[0]).term)
         .filter((term) => Boolean(term));
 }
+function requiredTag(entry, tag) {
+    const value = extractTag(entry, tag);
+    if (!value)
+        throw new InvalidAtomResponseError(`arXiv Atom entry is missing required ${tag}`);
+    return value;
+}
+function requiredTimestamp(entry, tag) {
+    const value = requiredTag(entry, tag);
+    if (Number.isNaN(Date.parse(value))) {
+        throw new InvalidAtomResponseError(`arXiv Atom entry has invalid ${tag}`);
+    }
+    return value;
+}
 export function parseEntries(xml, searchedCategory) {
-    const entries = xml.match(/<entry>[\s\S]*?<\/entry>/g) ?? [];
+    const feedStarts = xml.match(/<feed(?:\s[^>]*)?>/gi) ?? [];
+    const feedEnds = xml.match(/<\/feed\s*>/gi) ?? [];
+    if (feedStarts.length !== 1 ||
+        feedEnds.length !== 1 ||
+        !/<\/feed\s*>\s*$/i.test(xml)) {
+        throw new InvalidAtomResponseError("arXiv API returned a non-Atom response");
+    }
+    const entryStarts = xml.match(/<entry(?:\s[^>]*)?>/gi) ?? [];
+    const entryEnds = xml.match(/<\/entry\s*>/gi) ?? [];
+    const entries = xml.match(/<entry(?:\s[^>]*)?>[\s\S]*?<\/entry\s*>/gi) ?? [];
+    if (entryStarts.length !== entryEnds.length || entries.length !== entryStarts.length) {
+        throw new InvalidAtomResponseError("arXiv API returned a malformed Atom entry");
+    }
     return entries.map((entry) => {
-        const idUrl = extractTag(entry, "id") ?? "";
-        const version = idUrl.match(/\/abs\/(.+)$/)?.[1] ?? idUrl;
+        const idUrl = requiredTag(entry, "id");
+        const version = idUrl.match(/^https?:\/\/(?:www\.)?arxiv\.org\/abs\/(.+)$/i)?.[1];
+        if (!version || !/v\d+$/.test(version)) {
+            throw new InvalidAtomResponseError("arXiv Atom entry has invalid versioned id");
+        }
         const id = version.replace(/v\d+$/, "");
-        const title = (extractTag(entry, "title") ?? "").replace(/\s+/g, " ").trim();
-        const summary = (extractTag(entry, "summary") ?? "")
+        const title = requiredTag(entry, "title").replace(/\s+/g, " ").trim();
+        const summary = requiredTag(entry, "summary")
             .replace(/\s+/g, " ")
             .trim();
-        const authors = [...entry.matchAll(/<author>\s*<name>([\s\S]*?)<\/name>/g)].map((match) => xmlUnescape(match[1]).trim());
-        const links = extractLinks(entry);
-        const absUrl = links.find((link) => link.rel === "alternate")?.href ?? idUrl;
-        const pdfUrl = links.find((link) => link.title === "pdf")?.href ??
-            idUrl.replace("/abs/", "/pdf/");
+        const authors = [...entry.matchAll(/<author>\s*<name>([\s\S]*?)<\/name>/g)].map((match) => xmlUnescape(match[1]).trim()).filter(Boolean);
+        if (authors.length === 0) {
+            throw new InvalidAtomResponseError("arXiv Atom entry is missing required author");
+        }
         const categories = [searchedCategory, ...extractCategories(entry)];
         return {
             id,
@@ -63,10 +93,10 @@ export function parseEntries(xml, searchedCategory) {
             summary,
             authors,
             categories: [...new Set(categories)],
-            published: extractTag(entry, "published") ?? "",
-            updated: extractTag(entry, "updated") ?? "",
-            absUrl,
-            pdfUrl,
+            published: requiredTimestamp(entry, "published"),
+            updated: requiredTimestamp(entry, "updated"),
+            absUrl: `https://arxiv.org/abs/${version}`,
+            pdfUrl: `https://arxiv.org/pdf/${version}`,
         };
     });
 }
@@ -200,6 +230,27 @@ export function createArxivGateway(options = {}) {
             httpStatus: response.status,
         };
     }
+    function invalidResponseFailure(error) {
+        return {
+            kind: "invalid-response",
+            message: error instanceof InvalidAtomResponseError
+                ? error.message
+                : "arXiv API returned invalid Atom content",
+            retryable: false,
+        };
+    }
+    function replaceTerminalSuccess(requests, failure) {
+        const updated = [...requests];
+        const terminal = updated.at(-1);
+        if (terminal?.status === "succeeded") {
+            updated[updated.length - 1] = {
+                sequence: terminal.sequence,
+                status: "failed",
+                failure,
+            };
+        }
+        return updated;
+    }
     async function fetchText(url) {
         const requests = [];
         for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
@@ -296,11 +347,21 @@ export function createArxivGateway(options = {}) {
         const pending = fetchText(url).then((result) => {
             if (result.status === "failed")
                 return result;
-            return {
-                status: "succeeded",
-                papers: parseEntries(result.text, input.category),
-                requests: result.requests,
-            };
+            try {
+                return {
+                    status: "succeeded",
+                    papers: parseEntries(result.text, input.category),
+                    requests: result.requests,
+                };
+            }
+            catch (error) {
+                const failure = invalidResponseFailure(error);
+                return {
+                    status: "failed",
+                    failure,
+                    requests: replaceTerminalSuccess(result.requests, failure),
+                };
+            }
         });
         cache.set(url, pending);
         return pending;

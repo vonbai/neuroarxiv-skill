@@ -25,7 +25,7 @@ The subject areas and mechanism-specific terms used to discover prior art for a 
 _Avoid_: Query string, keywords
 
 **Paper**:
-A version-identifiable research work whose descriptive metadata was retrieved from an authoritative catalogue.
+A version-identifiable research work whose identity and required descriptive metadata were verified from an authoritative catalogue response.
 _Avoid_: Source, document, search result
 
 **Isolated Reading**:
@@ -33,12 +33,16 @@ An interpretation of exactly one Paper against the Build Problem, made without v
 _Avoid_: Summary, branch
 
 **Prior-Art Finding**:
-The approach, concrete borrow, limitation, and relevance extracted by an Isolated Reading.
+The approach, concrete borrow, limitation, and relevance extracted by a successful Isolated Reading.
 _Avoid_: Paper read, note
 
 **Paper Exclusion**:
-The exact version and reason for a retained Paper found irrelevant after Isolated Reading.
+The exact version and reason for a retained Paper found irrelevant by a successful Isolated Reading.
 _Avoid_: Missing finding, silent drop
+
+**Reading Failure**:
+The exact Paper version and isolation failure that prevented a trustworthy interpretation after bounded clean recovery.
+_Avoid_: Paper Exclusion, broken finding
 
 **Research Evidence**:
 Evidence grounded in a Paper that supports claims about a mechanism, its evaluation, and its reported limitations.
@@ -105,7 +109,7 @@ A Research Run that cannot produce a valid Recommended Path because isolation, v
 _Avoid_: Thin Coverage, partial success
 
 **Incomplete Reason**:
-The single explicit condition that prevents an Incomplete Research Run from producing a Recommended Path.
+The single explicit condition that prevents an Incomplete Research Run from producing a Recommended Path, together with the condition for a worthwhile future re-entry.
 _Avoid_: Open Thread, generic caveat
 
 **Open Thread**:

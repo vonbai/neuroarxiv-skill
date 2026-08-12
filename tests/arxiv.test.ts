@@ -75,11 +75,30 @@ test("parseEntries returns an empty array for a feed with no entries", () => {
   assert.deepEqual(parseEntries("<feed></feed>", "cs.AI"), []);
 });
 
+test("parseEntries rejects an Atom entry without authoritative Paper identity and metadata", () => {
+  assert.throws(
+    () => parseEntries("<feed><entry><title>Ghost Paper</title></entry></feed>", "cs.SE"),
+    /missing required id/i,
+  );
+});
+
+test("parseEntries rejects a truncated Atom entry instead of reporting an empty feed", () => {
+  assert.throws(
+    () =>
+      parseEntries(
+        "<feed><entry><id>https://arxiv.org/abs/2601.00001v1</id></feed>",
+        "cs.SE",
+      ),
+    /malformed Atom entry/i,
+  );
+});
+
 test("parseEntries preserves the archive prefix in legacy arXiv identifiers", () => {
   const xml = `<feed><entry>
     <id>https://arxiv.org/abs/hep-th/9901001v2</id>
     <title>Legacy identifier</title><summary>Abstract</summary>
     <published>1999-01-01T00:00:00Z</published><updated>1999-01-02T00:00:00Z</updated>
+    <author><name>Researcher</name></author>
   </entry></feed>`;
   const [result] = parseEntries(xml, "hep-th");
   assert.equal(result.id, "hep-th/9901001");
@@ -234,11 +253,61 @@ test("gateway bounds Retry-After by the Retrieval Run deadline", async () => {
   });
 
   assert.equal(outcome.status, "failed");
-  assert.equal(outcome.status, "failed");
   if (outcome.status === "failed") {
     assert.equal(outcome.failure.kind, "deadline-exhausted");
   }
   assert.deepEqual(sleeps, []);
+});
+
+test("gateway turns a malformed Atom entry into one structured failed request", async () => {
+  const gateway = createArxivGateway({
+    requestDelayMs: 0,
+    sleep: async () => undefined,
+    fetch: async () =>
+      new Response("<feed><entry><title>Ghost Paper</title></entry></feed>", { status: 200 }),
+  });
+
+  const outcome = await gateway.search({
+    category: "cs.SE",
+    terms: ["architecture recovery"],
+    maxResults: 4,
+    sinceYears: 8,
+  });
+
+  assert.equal(outcome.status, "failed");
+  if (outcome.status === "failed") {
+    assert.equal(outcome.failure.kind, "invalid-response");
+    assert.deepEqual(outcome.requests, [
+      { sequence: 1, status: "failed", failure: outcome.failure },
+    ]);
+  }
+});
+
+test("gateway turns a truncated Atom entry into one structured failed request", async () => {
+  const gateway = createArxivGateway({
+    requestDelayMs: 0,
+    sleep: async () => undefined,
+    fetch: async () =>
+      new Response(
+        "<feed><entry><id>https://arxiv.org/abs/2601.00001v1</id></feed>",
+        { status: 200 },
+      ),
+  });
+
+  const outcome = await gateway.search({
+    category: "cs.SE",
+    terms: ["architecture recovery"],
+    maxResults: 4,
+    sinceYears: 8,
+  });
+
+  assert.equal(outcome.status, "failed");
+  if (outcome.status === "failed") {
+    assert.equal(outcome.failure.kind, "invalid-response");
+    assert.deepEqual(outcome.requests, [
+      { sequence: 1, status: "failed", failure: outcome.failure },
+    ]);
+  }
 });
 
 test("gateway does not retry rejected requests or invalid Atom responses", async () => {

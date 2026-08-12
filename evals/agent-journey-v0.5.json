@@ -1,0 +1,36 @@
+{
+  "receiptVersion": 1,
+  "packageVersion": "0.5.0",
+  "skillSha256": "ad454833f5f431b165639d5f871821a58b31a92f50362d9b74205f81c6d55f43",
+  "evaluatedAt": "2026-08-12T12:19:49Z",
+  "evaluator": "fresh-isolated-agent",
+  "cases": [
+    {
+      "id": "explicit-entry",
+      "observedOutcome": "started",
+      "evidence": {
+        "reason": "The caller explicitly invokes NeuroArxiv, so eligibility requires proceeding immediately.",
+        "firstOwnedJourneyAction": "Record one eligible, bounded Build Problem for the open cache invalidation mechanism, then frame its Decision Context and default Budget."
+      }
+    },
+    {
+      "id": "implicit-trivial",
+      "observedOutcome": "inactive",
+      "evidence": {
+        "reason": "This is a trivial local rename and the mechanism is already fixed, so the implicit eligibility conditions are not satisfied; the caller's task continues without a Research Run."
+      }
+    },
+    {
+      "id": "persistent-contamination",
+      "observedOutcome": "incomplete-isolation-broken",
+      "evidence": {
+        "boundedRecoveryCount": 1,
+        "paperDisposition": "Paper A v1 must appear only in readingFailures with kind isolation-broken; it produces neither a Finding nor an Exclusion.",
+        "runStatus": "incomplete",
+        "reportBranch": "Incomplete Research Run with one isolation-broken Incomplete Reason and a verbatim Re-entry Condition; recommendation, angle, alternate, and pitfall sections are omitted.",
+        "recommendedPath": null,
+        "reentryRequired": true
+      }
+    }
+  ]
+}
